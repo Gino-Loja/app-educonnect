@@ -4,7 +4,7 @@ export default function LearnerSignup() {
     return (
         <div className="min-h-screen mx-auto">
 
-          <SignupForm userType="learner" />
+          <SignupForm userType="student" />
             
         </div>
     )

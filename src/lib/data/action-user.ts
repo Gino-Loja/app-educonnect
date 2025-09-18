@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
 import { createClient } from '@/utils/supabase/server'
-import { registerSchema } from '../validation/auth-schema'
+import { loginSchema, registerSchema } from '../validation/auth-schema'
 
 export async function login(
   prevState: any,
@@ -14,11 +14,12 @@ export async function login(
 
   // type-casting here for convenience
   // in practice, you should validate your inputs
-  const parsed = registerSchema.safeParse({
+  const parsed = loginSchema.safeParse({
     email: formData.get("email"),
     password: formData.get("password"),
-    confirmPassword: formData.get("confirmPassword"),
   })
+
+  console.log(parsed)
 
   if (!parsed.success) {
     // Retornamos los errores para mostrarlos en el formulario
@@ -44,7 +45,7 @@ export async function login(
 
 
   revalidatePath('/')
-  redirect('/account')
+  redirect('/workspace')
 
 }
 
@@ -74,6 +75,7 @@ export async function signup(prevState: any, formData: FormData) {
   }
 
 
+
   const { email, password } = parsed.data
   const { error } = await supabase.auth.signUp({
     email,
@@ -82,10 +84,12 @@ export async function signup(prevState: any, formData: FormData) {
       data: {
         role: parsed.data.role,
       },
+      emailRedirectTo: `http://localhost:3000/account/`,
     },
   })
 
   if (error) {
+    console.error("Error al registrar: ", error)
     return {
       status: "error",
       message: error.message,
@@ -94,5 +98,8 @@ export async function signup(prevState: any, formData: FormData) {
 
 
   revalidatePath('/signup')
-  redirect('/account')
+  return {
+    status: "success",
+    message: "¡Bienvenido/a! Hemos enviado un correo electrónico de confirmación a tu correo electrónico.",
+  }
 }

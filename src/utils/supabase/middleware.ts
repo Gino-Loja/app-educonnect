@@ -27,41 +27,41 @@ export async function updateSession(request: NextRequest) {
         }
     )
 
-    // Do not run code between createServerClient and
-    // supabase.auth.getUser(). A simple mistake could make it very hard to debug
-    // issues with users being randomly logged out.
-
     // IMPORTANT: DO NOT REMOVE auth.getUser()
-
     const {
         data: { user },
     } = await supabase.auth.getUser()
 
+    // If user is authenticated and trying to access auth pages, redirect to workspace
+    // BUT allow access to update-password even if authenticated
+
+    if (
+        user &&
+        (request.nextUrl.pathname.startsWith('/login') ||
+         request.nextUrl.pathname.startsWith('/auth') ||
+         request.nextUrl.pathname.startsWith('/signup')) &&
+        !request.nextUrl.pathname.startsWith('/update-password') // 👈 Permitir update-password
+    ) {
+        const url = request.nextUrl.clone()
+        url.pathname = '/workspace'
+        return NextResponse.redirect(url)
+    }
+
+    // If user is not authenticated and trying to access protected pages, redirect to login
     if (
         !user &&
         request.nextUrl.pathname !== '/' && // 👈 dejamos libre la raíz
         !request.nextUrl.pathname.startsWith('/login') &&
         !request.nextUrl.pathname.startsWith('/auth') &&
         !request.nextUrl.pathname.startsWith('/signup') &&
-        !request.nextUrl.pathname.startsWith('/error')
+        !request.nextUrl.pathname.startsWith('/forgot-password') &&
+        !request.nextUrl.pathname.startsWith('/update-password') && // 👈 permitir update-password sin auth también
+        request.nextUrl.pathname !== '/confirm' // 👈 permitir confirmación de email
     ) {
         const url = request.nextUrl.clone()
         url.pathname = '/login'
         return NextResponse.redirect(url)
     }
-
-    // IMPORTANT: You *must* return the supabaseResponse object as it is.
-    // If you're creating a new response object with NextResponse.next() make sure to:
-    // 1. Pass the request in it, like so:
-    //    const myNewResponse = NextResponse.next({ request })
-    // 2. Copy over the cookies, like so:
-    //    myNewResponse.cookies.setAll(supabaseResponse.cookies.getAll())
-    // 3. Change the myNewResponse object to fit your needs, but avoid changing
-    //    the cookies!
-    // 4. Finally:
-    //    return myNewResponse
-    // If this is not done, you may be causing the browser and server to go out
-    // of sync and terminate the user's session prematurely!
 
     return supabaseResponse
 }

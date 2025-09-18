@@ -38,8 +38,6 @@ const SignupForm = ({ userType }: { userType: string }) => {
         undefined,
     );
 
-    console.log(errorMessage)
-
     const features = [
         {
             icon: Users,
@@ -57,6 +55,7 @@ const SignupForm = ({ userType }: { userType: string }) => {
             description: "Transacciones protegidas con garantía de satisfacción",
         },
     ]
+    
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
@@ -129,8 +128,21 @@ const SignupForm = ({ userType }: { userType: string }) => {
                             <p className="text-gray-600">Únete a nuestra comunidad educativa</p>
                         </div>
 
-                        {errorMessage && <p className="text-red-500 text-sm text-center" >{errorMessage.message.toString()}</p>}
-
+                        {errorMessage && errorMessage.status === "error" && (
+                            <p className="text-red-500 text-sm text-center">{errorMessage.message.toString()}</p>
+                        )}
+                        {errorMessage && errorMessage.status === "success" && (
+                            <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
+                                <div className="flex items-center space-x-2">
+                                    <CheckCircle className="w-5 h-5 text-green-600" />
+                                    <p className="text-green-800 text-sm font-medium">
+                                        {typeof errorMessage?.message === "string"
+                                            ? errorMessage.message
+                                            : JSON.stringify(errorMessage.message)}
+                                    </p>
+                                </div>
+                            </div>
+                        )}
 
                         {/* Register Form */}
                         <form action={formAction} className="space-y-6">

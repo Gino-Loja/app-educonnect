@@ -143,34 +143,7 @@ const EduConnectLanding = () => {
             </div>
 
             {/* Navigation */}
-            <nav className="hidden md:flex items-center space-x-8">
-              <div className="flex space-x-8">
-                <button
-                  onClick={() => setActiveTab('student')}
-                  className={`px-4 py-2 text-sm font-medium transition-colors relative ${activeTab === 'student'
-                    ? 'text-blue-600'
-                    : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                >
-                  Necesito ayuda
-                  {activeTab === 'student' && (
-                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-600"></div>
-                  )}
-                </button>
-                <button
-                  onClick={() => setActiveTab('teacher')}
-                  className={`px-4 py-2 text-sm font-medium transition-colors relative ${activeTab === 'teacher'
-                    ? 'text-purple-600'
-                    : 'text-gray-600 hover:text-gray-900'
-                    }`}
-                >
-                  Quiero enseñar
-                  {activeTab === 'teacher' && (
-                    <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-600"></div>
-                  )}
-                </button>
-              </div>
-            </nav>
+
 
             {/* Auth Buttons */}
 
@@ -243,13 +216,20 @@ const EduConnectLanding = () => {
 
               {/* CTA Buttons */}
               <div className="flex items-center space-x-6">
-                <button className="bg-blue-600 text-white px-8 py-4 rounded-full font-semibold text-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/25">
-                  Publicar tarea
-                </button>
-                <button className="flex items-center space-x-2 text-purple-600 font-semibold text-lg hover:text-purple-700 transition-colors">
-                  <span>¿Quieres trabajar?</span>
-                  <ArrowRight size={20} />
-                </button>
+                <Link href="/workspace">
+                  <button className="bg-blue-600 text-white px-8 py-4 rounded-full font-semibold text-lg hover:bg-blue-700 transition-colors shadow-lg shadow-blue-600/25">
+                    Publicar tarea
+                  </button>
+                </Link>
+
+                <Link href="/workspace">
+                  <button className="flex items-center space-x-2 text-purple-600 font-semibold text-lg hover:text-purple-700 transition-colors">
+                    <span>¿Quieres trabajar?</span>
+                    <ArrowRight size={20} />
+                  </button>
+                </Link>
+
+
               </div>
             </div>
 
