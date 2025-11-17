@@ -1,0 +1,656 @@
+"use server"
+
+import { createClient } from "@/utils/supabase/server"
+import { revalidatePath } from "next/cache"
+import { createSubmissionSchema, updateSubmissionSchema } from "@/lib/validation/submission-schema"
+import type { Database } from "@/model/schema"
+
+type TaskSubmission = Database["public"]["Tables"]["task_submissions"]["Row"]
+
+export type ActionState = {
+  status: "error" | "success"
+  message: string
+}
+
+const initialState: ActionState = {
+  status: "error",
+  message: "",
+}
+
+export async function createSubmission(
+  prevState: ActionState | null,
+  formData: FormData
+): Promise<ActionState> {
+  try {
+    const supabase = await createClient()
+
+    // Verify user is authenticated
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return { status: "error", message: "No autenticado" }
+    }
+
+    // Parse and validate form data
+    const filesUrls = formData.get("submission_files_urls")
+    let parsedFilesUrls: string[] | null = null
+    if (filesUrls && typeof filesUrls === "string" && filesUrls.trim() !== "") {
+      try {
+        parsedFilesUrls = JSON.parse(filesUrls)
+      } catch {
+        parsedFilesUrls = null
+      }
+    }
+
+    const rawData = {
+      task_id: formData.get("task_id") as string,
+      submission_text: formData.get("submission_text") as string,
+      submission_files_urls: parsedFilesUrls,
+    }
+
+    const validation = createSubmissionSchema.safeParse(rawData)
+    if (!validation.success) {
+      return {
+        status: "error",
+        message: validation.error.issues[0].message,
+      }
+    }
+
+    // Check if task exists and is in_progress
+    const { data: task, error: taskError } = await supabase
+      .from("tasks")
+      .select("id, status, teacher_id")
+      .eq("id", validation.data.task_id)
+      .single()
+
+    if (taskError || !task) {
+      return { status: "error", message: "Tarea no encontrada" }
+    }
+
+    if (task.teacher_id !== user.id) {
+      return { status: "error", message: "No tienes permiso para entregar esta tarea" }
+    }
+
+    if (task.status !== "in_progress") {
+      return { status: "error", message: "Solo puedes entregar tareas en progreso" }
+    }
+
+    // Check if submission already exists
+    const { data: existingSubmission } = await supabase
+      .from("task_submissions")
+      .select("id")
+      .eq("task_id", validation.data.task_id)
+      .single()
+
+    if (existingSubmission) {
+      return { status: "error", message: "Ya existe una entrega para esta tarea" }
+    }
+
+    // Create submission
+    const { error: insertError } = await supabase
+      .from("task_submissions")
+      .insert({
+        task_id: validation.data.task_id,
+        teacher_id: user.id,
+        content: validation.data.submission_text,
+        attachments: validation.data.submission_files_urls || null,
+        is_final: false,
+      })
+
+    if (insertError) {
+      console.error("Error creating submission:", insertError)
+      return { status: "error", message: "Error al crear la entrega" }
+    }
+
+    // Update task status to 'submitted'
+    const { error: updateTaskError } = await supabase
+      .from("tasks")
+      .update({ status: "submitted" })
+      .eq("id", validation.data.task_id)
+
+    if (updateTaskError) {
+      console.error("Error updating task status:", updateTaskError)
+      return { status: "error", message: "Entrega creada pero error al actualizar tarea" }
+    }
+
+    revalidatePath("/workspace/mis-trabajos")
+
+    return { status: "success", message: "Trabajo entregado exitosamente" }
+  } catch (error) {
+    console.error("Unexpected error creating submission:", error)
+    return { status: "error", message: "Error inesperado al crear la entrega" }
+  }
+}
+
+export async function updateSubmission(
+  prevState: ActionState | null,
+  formData: FormData
+): Promise<ActionState> {
+  try {
+    const supabase = await createClient()
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return { status: "error", message: "No autenticado" }
+    }
+
+    const filesUrls = formData.get("submission_files_urls")
+    let parsedFilesUrls: string[] | null | undefined = undefined
+    if (filesUrls !== null) {
+      if (typeof filesUrls === "string" && filesUrls.trim() !== "") {
+        try {
+          parsedFilesUrls = JSON.parse(filesUrls)
+        } catch {
+          parsedFilesUrls = null
+        }
+      } else {
+        parsedFilesUrls = null
+      }
+    }
+
+    const rawData = {
+      id: formData.get("id") as string,
+      submission_text: formData.get("submission_text") as string || undefined,
+      submission_files_urls: parsedFilesUrls,
+    }
+
+    const validation = updateSubmissionSchema.safeParse(rawData)
+    if (!validation.success) {
+      return {
+        status: "error",
+        message: validation.error.issues[0].message,
+      }
+    }
+
+    // Verify ownership via task
+    const { data: submission, error: submissionError } = await supabase
+      .from("task_submissions")
+      .select(`
+        id,
+        task:tasks (
+          teacher_id,
+          status
+        )
+      `)
+      .eq("id", validation.data.id)
+      .single()
+
+    if (submissionError || !submission) {
+      return { status: "error", message: "Entrega no encontrada" }
+    }
+
+    const task = Array.isArray(submission.task) ? submission.task[0] : submission.task
+
+    if (task.teacher_id !== user.id) {
+      return { status: "error", message: "No tienes permiso para editar esta entrega" }
+    }
+
+    if (task.status !== "submitted") {
+      return { status: "error", message: "Solo puedes editar entregas pendientes de revisión" }
+    }
+
+    // Build update object
+    const updateData: Record<string, unknown> = {}
+    if (validation.data.submission_text !== undefined) {
+      updateData.submission_text = validation.data.submission_text
+    }
+    if (validation.data.submission_files_urls !== undefined) {
+      updateData.submission_files_urls = validation.data.submission_files_urls
+    }
+
+    const { error: updateError } = await supabase
+      .from("task_submissions")
+      .update(updateData)
+      .eq("id", validation.data.id)
+
+    if (updateError) {
+      console.error("Error updating submission:", updateError)
+      return { status: "error", message: "Error al actualizar la entrega" }
+    }
+
+    revalidatePath("/workspace/mis-trabajos")
+
+    return { status: "success", message: "Entrega actualizada exitosamente" }
+  } catch (error) {
+    console.error("Unexpected error updating submission:", error)
+    return { status: "error", message: "Error inesperado al actualizar la entrega" }
+  }
+}
+
+export async function getMySubmissions(options?: {
+  page?: number
+  limit?: number
+}): Promise<{ submissions: TaskSubmission[]; total: number }> {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { submissions: [], total: 0 }
+    }
+
+    const page = options?.page || 1
+    const limit = options?.limit || 10
+    const offset = (page - 1) * limit
+
+    const { data, error, count } = await supabase
+      .from("task_submissions")
+      .select(`
+        *,
+        task:tasks (
+          id,
+          title,
+          description,
+          status,
+          agreed_price,
+          deadline,
+          student:profiles!tasks_student_id_fkey (
+            name,
+            profile_picture_url
+          )
+        )
+      `, { count: "exact" })
+      .eq("task.teacher_id", user.id)
+      .order("submitted_at", { ascending: false })
+      .range(offset, offset + limit - 1)
+
+    if (error) {
+      console.error("Error fetching submissions:", error)
+      return { submissions: [], total: 0 }
+    }
+
+    return { submissions: data || [], total: count || 0 }
+  } catch (error) {
+    console.error("Unexpected error fetching submissions:", error)
+    return { submissions: [], total: 0 }
+  }
+}
+
+export async function getSubmissionById(submissionId: string): Promise<TaskSubmission | null> {
+  try {
+    const supabase = await createClient()
+
+    const { data, error } = await supabase
+      .from("task_submissions")
+      .select(`
+        *,
+        task:tasks (
+          id,
+          title,
+          description,
+          status,
+          agreed_price,
+          deadline,
+          student:profiles!tasks_student_id_fkey (
+            name,
+            profile_picture_url
+          ),
+          teacher:profiles!tasks_teacher_id_fkey (
+            name,
+            profile_picture_url
+          )
+        )
+      `)
+      .eq("id", submissionId)
+      .single()
+
+    if (error) {
+      console.error("Error fetching submission:", error)
+      return null
+    }
+
+    return data
+  } catch (error) {
+    console.error("Unexpected error fetching submission:", error)
+    return null
+  }
+}
+
+/**
+ * Submit work with image uploads to Supabase Storage
+ */
+export async function submitWork(formData: FormData): Promise<ActionState> {
+  try {
+    const supabase = await createClient()
+
+    // Verify user is authenticated
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return { status: "error", message: "No autenticado" }
+    }
+
+    const taskId = formData.get("task_id") as string
+    const description = formData.get("description") as string
+    const imageCount = parseInt(formData.get("image_count") as string)
+
+    // Validate
+    if (!taskId || !description || description.length < 20) {
+      return { status: "error", message: "Datos inválidos" }
+    }
+
+    if (imageCount < 1 || imageCount > 5) {
+      return { status: "error", message: "Debes subir entre 1 y 5 imágenes" }
+    }
+
+    // Check if task exists and user is the teacher
+    const { data: task, error: taskError } = await supabase
+      .from("tasks")
+      .select("id, status, teacher_id, student_id, title")
+      .eq("id", taskId)
+      .single()
+
+    if (taskError || !task) {
+      return { status: "error", message: "Tarea no encontrada" }
+    }
+
+    if (task.teacher_id !== user.id) {
+      return { status: "error", message: "No tienes permiso para entregar esta tarea" }
+    }
+
+    if (task.status !== "in_progress") {
+      return { status: "error", message: "Solo puedes entregar tareas en progreso" }
+    }
+
+    // Check if submission already exists
+    const { data: existingSubmission } = await supabase
+      .from("task_submissions")
+      .select("id")
+      .eq("task_id", taskId)
+      .maybeSingle()
+
+    if (existingSubmission) {
+      return { status: "error", message: "Ya existe una entrega para esta tarea" }
+    }
+
+    // Upload images to Supabase Storage
+    const imageUrls: string[] = []
+    const bucket = "task-submissions" // Make sure this bucket exists in Supabase Storage
+
+    for (let i = 0; i < imageCount; i++) {
+      const imageFile = formData.get(`image_${i}`) as File
+      if (!imageFile) continue
+
+      // Generate unique filename
+      const fileExt = imageFile.name.split(".").pop()
+      const fileName = `${taskId}/${Date.now()}_${i}.${fileExt}`
+
+      // Upload to Supabase Storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from(bucket)
+        .upload(fileName, imageFile, {
+          cacheControl: "3600",
+          upsert: false,
+        })
+
+      if (uploadError) {
+        console.error("Error uploading image:", uploadError)
+        // Clean up already uploaded images
+        for (const url of imageUrls) {
+          const path = url.split("/").slice(-2).join("/")
+          await supabase.storage.from(bucket).remove([path])
+        }
+        return { status: "error", message: "Error al subir las imágenes" }
+      }
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from(bucket)
+        .getPublicUrl(uploadData.path)
+
+      imageUrls.push(publicUrl)
+    }
+
+    // Create submission record
+    const { error: insertError } = await supabase
+      .from("task_submissions")
+      .insert({
+        task_id: taskId,
+        teacher_id: user.id,
+        content: description,
+        attachments: imageUrls,
+        is_final: false,
+      })
+
+    if (insertError) {
+      console.error("Error creating submission:", insertError)
+      // Clean up uploaded images
+      for (const url of imageUrls) {
+        const path = url.split("/").slice(-2).join("/")
+        await supabase.storage.from(bucket).remove([path])
+      }
+      return { status: "error", message: "Error al crear la entrega" }
+    }
+
+    // Update task status to 'submitted'
+    const { error: updateTaskError } = await supabase
+      .from("tasks")
+      .update({ status: "submitted" })
+      .eq("id", taskId)
+
+    if (updateTaskError) {
+      console.error("Error updating task status:", updateTaskError)
+    }
+
+    revalidatePath("/workspace/mis-trabajos")
+    revalidatePath("/workspace/mis-tareas")
+
+    return { status: "success", message: "Trabajo entregado exitosamente" }
+  } catch (error) {
+    console.error("Unexpected error submitting work:", error)
+    return { status: "error", message: "Error inesperado al enviar el trabajo" }
+  }
+}
+
+/**
+ * Approve a submission (student action)
+ */
+export async function approveSubmission(submissionId: string): Promise<ActionState> {
+  try {
+    const supabase = await createClient()
+
+    // Verify user is authenticated
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return { status: "error", message: "No autenticado" }
+    }
+
+    // Get submission with task info
+    const { data: submission, error: submissionError } = await supabase
+      .from("task_submissions")
+      .select(`
+        id,
+        task_id,
+        is_approved,
+        task:tasks!inner (
+          id,
+          student_id,
+          status,
+          title
+        )
+      `)
+      .eq("id", submissionId)
+      .single()
+
+    if (submissionError || !submission) {
+      return { status: "error", message: "Entrega no encontrada" }
+    }
+
+    const task = Array.isArray(submission.task) ? submission.task[0] : submission.task
+
+    // Verify user is the student
+    if (task.student_id !== user.id) {
+      return { status: "error", message: "No tienes permiso para aprobar esta entrega" }
+    }
+
+    // Verify task is in submitted state
+    if (task.status !== "submitted") {
+      return { status: "error", message: "Solo puedes aprobar entregas pendientes" }
+    }
+
+    // Check if already approved
+    if (submission.is_approved === true) {
+      return { status: "error", message: "Esta entrega ya fue aprobada" }
+    }
+
+    // Update submission
+    const { error: updateSubmissionError } = await supabase
+      .from("task_submissions")
+      .update({
+        is_approved: true,
+        reviewed_at: new Date().toISOString(),
+      })
+      .eq("id", submissionId)
+
+    if (updateSubmissionError) {
+      console.error("Error updating submission:", updateSubmissionError)
+      return { status: "error", message: "Error al aprobar la entrega" }
+    }
+
+    // Update task status to completed
+    const { error: updateTaskError } = await supabase
+      .from("tasks")
+      .update({ status: "completed" })
+      .eq("id", submission.task_id)
+
+    if (updateTaskError) {
+      console.error("Error updating task status:", updateTaskError)
+    }
+
+    revalidatePath("/workspace/mis-tareas")
+    revalidatePath("/workspace/mis-trabajos")
+
+    return { status: "success", message: "Trabajo aprobado exitosamente" }
+  } catch (error) {
+    console.error("Unexpected error approving submission:", error)
+    return { status: "error", message: "Error inesperado al aprobar el trabajo" }
+  }
+}
+
+/**
+ * Reject a submission (student action)
+ */
+export async function rejectSubmission(
+  submissionId: string,
+  feedback: string
+): Promise<ActionState> {
+  try {
+    const supabase = await createClient()
+
+    // Verify user is authenticated
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return { status: "error", message: "No autenticado" }
+    }
+
+    // Validate feedback
+    if (!feedback || feedback.trim().length < 10) {
+      return { status: "error", message: "Debes proporcionar una razón detallada (mín. 10 caracteres)" }
+    }
+
+    // Get submission with task info
+    const { data: submission, error: submissionError } = await supabase
+      .from("task_submissions")
+      .select(`
+        id,
+        task_id,
+        is_approved,
+        task:tasks!inner (
+          id,
+          student_id,
+          status,
+          title
+        )
+      `)
+      .eq("id", submissionId)
+      .single()
+
+    if (submissionError || !submission) {
+      return { status: "error", message: "Entrega no encontrada" }
+    }
+
+    const task = Array.isArray(submission.task) ? submission.task[0] : submission.task
+
+    // Verify user is the student
+    if (task.student_id !== user.id) {
+      return { status: "error", message: "No tienes permiso para rechazar esta entrega" }
+    }
+
+    // Verify task is in submitted state
+    if (task.status !== "submitted") {
+      return { status: "error", message: "Solo puedes rechazar entregas pendientes" }
+    }
+
+    // Update submission
+    const { error: updateSubmissionError } = await supabase
+      .from("task_submissions")
+      .update({
+        is_approved: false,
+        reviewed_at: new Date().toISOString(),
+        student_feedback: feedback,
+      })
+      .eq("id", submissionId)
+
+    if (updateSubmissionError) {
+      console.error("Error updating submission:", updateSubmissionError)
+      return { status: "error", message: "Error al rechazar la entrega" }
+    }
+
+    // Update task status back to in_progress so teacher can resubmit
+    const { error: updateTaskError } = await supabase
+      .from("tasks")
+      .update({ status: "in_progress" })
+      .eq("id", submission.task_id)
+
+    if (updateTaskError) {
+      console.error("Error updating task status:", updateTaskError)
+    }
+
+    revalidatePath("/workspace/mis-tareas")
+    revalidatePath("/workspace/mis-trabajos")
+
+    return { status: "success", message: "Trabajo rechazado. El profesor fue notificado." }
+  } catch (error) {
+    console.error("Unexpected error rejecting submission:", error)
+    return { status: "error", message: "Error inesperado al rechazar el trabajo" }
+  }
+}
+
+/**
+ * Get submission for a task (for student to review)
+ */
+export async function getSubmissionByTaskId(taskId: string): Promise<{
+  submission: any | null
+  error?: string
+}> {
+  try {
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+      return { submission: null, error: "No autenticado" }
+    }
+
+    const { data, error } = await supabase
+      .from("task_submissions")
+      .select(`
+        *,
+        teacher:profiles!task_submissions_teacher_id_fkey (
+          name,
+          profile_picture_url
+        )
+      `)
+      .eq("task_id", taskId)
+      .order("submitted_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (error) {
+      console.error("Error fetching submission:", error)
+      return { submission: null, error: "Error al obtener la entrega" }
+    }
+
+    return { submission: data }
+  } catch (error) {
+    console.error("Unexpected error fetching submission:", error)
+    return { submission: null, error: "Error inesperado" }
+  }
+}

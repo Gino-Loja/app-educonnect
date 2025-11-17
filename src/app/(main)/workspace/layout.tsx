@@ -1,4 +1,5 @@
 import { createClient } from "@/utils/supabase/server"
+import { Toaster } from "@/components/ui/sonner"
 
 export default async function RootLayout({
     children,
@@ -32,9 +33,9 @@ export default async function RootLayout({
 
     return (
         <>
-           
 
                 {data.user.user_metadata.role === "student" ? student : teacher}
+                <Toaster position="top-center" />
 
         </>
     )

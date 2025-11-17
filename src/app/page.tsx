@@ -110,7 +110,7 @@ const EduConnectLanding = () => {
   const SubjectIcon = ({ subject, className, delay }:
     {
       subject: {
-        icon: any;
+        icon: React.ComponentType<{ className?: string; size?: number }>;
         name: string;
         color: string;
       };

@@ -1,4 +1,5 @@
-export default function Page(){
-    return <div>Student</div>
-    
+import { redirect } from "next/navigation"
+
+export default function Page() {
+  redirect("/workspace/dashboard")
 }

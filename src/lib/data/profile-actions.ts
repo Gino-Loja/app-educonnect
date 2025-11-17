@@ -59,13 +59,12 @@ const profileSchema = z.object({
   profilePictureUrl: z.string().url('URL inválida').optional().or(z.literal('')),
   websiteUrl: z.string().url('URL inválida').optional().or(z.literal('')),
   linkedinUrl: z.string().url('URL inválida').optional().or(z.literal('')),
-  address: z.string().optional(),
   city: z.string().optional(),
   state: z.string().optional(),
   bio: z.string().optional(),
 })
 
-export async function updateProfile(profileId: string, prevState: any, formData: FormData) {
+export async function updateProfile(profileId: string, prevState: unknown, formData: FormData) {
   const supabase = await createClient();
   
   // Manejar la subida de imagen si existe
@@ -95,7 +94,6 @@ export async function updateProfile(profileId: string, prevState: any, formData:
     profilePictureUrl: formData.get('profilePictureUrl') as string,
     websiteUrl: formData.get('websiteUrl') as string,
     linkedinUrl: formData.get('linkedinUrl') as string,
-    address: formData.get('address') as string,
     city: formData.get('city') as string,
     state: formData.get('state') as string,
     bio: formData.get('bio') as string,
@@ -122,7 +120,6 @@ export async function updateProfile(profileId: string, prevState: any, formData:
       profile_picture_url: uploadedImageUrl || parsed.data.profilePictureUrl || null,
       website_url: parsed.data.websiteUrl || null,
       linkedin_url: parsed.data.linkedinUrl || null,
-      // address: parsed.data.address || null,
       city: parsed.data.city || null,
       state: parsed.data.state || null,
       bio: parsed.data.bio || null,

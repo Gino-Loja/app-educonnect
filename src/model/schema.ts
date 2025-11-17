@@ -12,33 +12,187 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "13.0.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
+      notifications: {
+        Row: {
+          created_at: string | null
+          id: string
+          is_read: boolean | null
+          link: string | null
+          message: string
+          metadata: Json | null
+          read_at: string | null
+          title: string
+          type: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          is_read?: boolean | null
+          link?: string | null
+          message: string
+          metadata?: Json | null
+          read_at?: string | null
+          title: string
+          type: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          is_read?: boolean | null
+          link?: string | null
+          message?: string
+          metadata?: Json | null
+          read_at?: string | null
+          title?: string
+          type?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "notifications_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payment_milestones: {
+        Row: {
+          amount: number
+          created_at: string | null
+          description: string | null
+          due_date: string | null
+          id: string
+          milestone_number: number
+          paid_at: string | null
+          paid_by: string | null
+          payment_proof_url: string | null
+          payment_reference: string | null
+          rejection_reason: string | null
+          status: string
+          submission_id: string | null
+          submitted_at: string | null
+          task_id: string
+          title: string
+          updated_at: string | null
+          verified_at: string | null
+          verified_by: string | null
+        }
+        Insert: {
+          amount: number
+          created_at?: string | null
+          description?: string | null
+          due_date?: string | null
+          id?: string
+          milestone_number: number
+          paid_at?: string | null
+          paid_by?: string | null
+          payment_proof_url?: string | null
+          payment_reference?: string | null
+          rejection_reason?: string | null
+          status?: string
+          submission_id?: string | null
+          submitted_at?: string | null
+          task_id: string
+          title: string
+          updated_at?: string | null
+          verified_at?: string | null
+          verified_by?: string | null
+        }
+        Update: {
+          amount?: number
+          created_at?: string | null
+          description?: string | null
+          due_date?: string | null
+          id?: string
+          milestone_number?: number
+          paid_at?: string | null
+          paid_by?: string | null
+          payment_proof_url?: string | null
+          payment_reference?: string | null
+          rejection_reason?: string | null
+          status?: string
+          submission_id?: string | null
+          submitted_at?: string | null
+          task_id?: string
+          title?: string
+          updated_at?: string | null
+          verified_at?: string | null
+          verified_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_milestones_submission_id_fkey"
+            columns: ["submission_id"]
+            isOneToOne: false
+            referencedRelation: "task_submissions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_milestones_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      platform_settings: {
+        Row: {
+          account_holder: string | null
+          account_number: string | null
+          account_type: string | null
+          bank_name: string | null
+          commission_rate: number
+          contact_email: string | null
+          country: string | null
+          created_at: string | null
+          currency: string | null
+          fiscal_id: string | null
+          id: string
+          swift_code: string | null
+          updated_at: string | null
+          updated_by: string | null
+        }
+        Insert: {
+          account_holder?: string | null
+          account_number?: string | null
+          account_type?: string | null
+          bank_name?: string | null
+          commission_rate?: number
+          contact_email?: string | null
+          country?: string | null
+          created_at?: string | null
+          currency?: string | null
+          fiscal_id?: string | null
+          id?: string
+          swift_code?: string | null
+          updated_at?: string | null
+          updated_by?: string | null
+        }
+        Update: {
+          account_holder?: string | null
+          account_number?: string | null
+          account_type?: string | null
+          bank_name?: string | null
+          commission_rate?: number
+          contact_email?: string | null
+          country?: string | null
+          created_at?: string | null
+          currency?: string | null
+          fiscal_id?: string | null
+          id?: string
+          swift_code?: string | null
+          updated_at?: string | null
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           bio: string | null
@@ -81,7 +235,7 @@ export type Database = {
           email_notifications?: boolean | null
           gender?: string | null
           headline?: string | null
-          id?: string
+          id: string
           is_active?: boolean | null
           last_active_at?: string | null
           lastname?: string | null
@@ -131,6 +285,129 @@ export type Database = {
           website_url?: string | null
         }
         Relationships: []
+      }
+      proposals: {
+        Row: {
+          cover_letter: string
+          created_at: string
+          estimated_hours: number | null
+          id: string
+          is_active: boolean
+          message: string | null
+          proposed_amount: number
+          response_date: string | null
+          status: Database["public"]["Enums"]["proposal_status"]
+          task_id: string
+          teacher_id: string
+          updated_at: string
+        }
+        Insert: {
+          cover_letter: string
+          created_at?: string
+          estimated_hours?: number | null
+          id?: string
+          is_active?: boolean
+          message?: string | null
+          proposed_amount: number
+          response_date?: string | null
+          status?: Database["public"]["Enums"]["proposal_status"]
+          task_id: string
+          teacher_id: string
+          updated_at?: string
+        }
+        Update: {
+          cover_letter?: string
+          created_at?: string
+          estimated_hours?: number | null
+          id?: string
+          is_active?: boolean
+          message?: string | null
+          proposed_amount?: number
+          response_date?: string | null
+          status?: Database["public"]["Enums"]["proposal_status"]
+          task_id?: string
+          teacher_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "proposals_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "proposals_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      reviews: {
+        Row: {
+          comment: string | null
+          communication_rating: number | null
+          created_at: string
+          id: string
+          is_edited: boolean
+          is_public: boolean
+          professionalism_rating: number | null
+          quality_rating: number | null
+          rating: number
+          reviewee_id: string
+          reviewer_id: string
+          task_id: string
+          updated_at: string
+        }
+        Insert: {
+          comment?: string | null
+          communication_rating?: number | null
+          created_at?: string
+          id?: string
+          is_edited?: boolean
+          is_public?: boolean
+          professionalism_rating?: number | null
+          quality_rating?: number | null
+          rating: number
+          reviewee_id: string
+          reviewer_id: string
+          task_id: string
+          updated_at?: string
+        }
+        Update: {
+          comment?: string | null
+          communication_rating?: number | null
+          created_at?: string
+          id?: string
+          is_edited?: boolean
+          is_public?: boolean
+          professionalism_rating?: number | null
+          quality_rating?: number | null
+          rating?: number
+          reviewee_id?: string
+          reviewer_id?: string
+          task_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reviews_reviewee_id_fkey"
+            columns: ["reviewee_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reviews_reviewer_id_fkey"
+            columns: ["reviewer_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       students: {
         Row: {
@@ -225,6 +502,175 @@ export type Database = {
           },
         ]
       }
+      task_submissions: {
+        Row: {
+          attachments: Json | null
+          content: string
+          created_at: string
+          id: string
+          is_approved: boolean | null
+          is_final: boolean
+          notes: string | null
+          reviewed_at: string | null
+          student_feedback: string | null
+          submitted_at: string
+          task_id: string
+          teacher_id: string
+          updated_at: string
+          version: number
+        }
+        Insert: {
+          attachments?: Json | null
+          content: string
+          created_at?: string
+          id?: string
+          is_approved?: boolean | null
+          is_final?: boolean
+          notes?: string | null
+          reviewed_at?: string | null
+          student_feedback?: string | null
+          submitted_at?: string
+          task_id: string
+          teacher_id: string
+          updated_at?: string
+          version?: number
+        }
+        Update: {
+          attachments?: Json | null
+          content?: string
+          created_at?: string
+          id?: string
+          is_approved?: boolean | null
+          is_final?: boolean
+          notes?: string | null
+          reviewed_at?: string | null
+          student_feedback?: string | null
+          submitted_at?: string
+          task_id?: string
+          teacher_id?: string
+          updated_at?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "task_submissions_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "task_submissions_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tasks: {
+        Row: {
+          academic_level: string
+          attachments: Json | null
+          budget_max: number | null
+          budget_min: number | null
+          completion_date: string | null
+          created_at: string
+          description: string
+          difficulty: string | null
+          due_date: string | null
+          estimated_hours: number | null
+          id: string
+          installments: number | null
+          is_active: boolean
+          payment_type: Database["public"]["Enums"]["payment_type"] | null
+          priority: Database["public"]["Enums"]["task_priority"]
+          proposals_count: number
+          selected_proposal_id: string | null
+          status: Database["public"]["Enums"]["task_status"]
+          student_id: string
+          subject: string
+          teacher_id: string | null
+          title: string
+          topic_tags: string[] | null
+          updated_at: string
+        }
+        Insert: {
+          academic_level: string
+          attachments?: Json | null
+          budget_max?: number | null
+          budget_min?: number | null
+          completion_date?: string | null
+          created_at?: string
+          description: string
+          difficulty?: string | null
+          due_date?: string | null
+          estimated_hours?: number | null
+          id?: string
+          installments?: number | null
+          is_active?: boolean
+          payment_type?: Database["public"]["Enums"]["payment_type"] | null
+          priority?: Database["public"]["Enums"]["task_priority"]
+          proposals_count?: number
+          selected_proposal_id?: string | null
+          status?: Database["public"]["Enums"]["task_status"]
+          student_id: string
+          subject: string
+          teacher_id?: string | null
+          title: string
+          topic_tags?: string[] | null
+          updated_at?: string
+        }
+        Update: {
+          academic_level?: string
+          attachments?: Json | null
+          budget_max?: number | null
+          budget_min?: number | null
+          completion_date?: string | null
+          created_at?: string
+          description?: string
+          difficulty?: string | null
+          due_date?: string | null
+          estimated_hours?: number | null
+          id?: string
+          installments?: number | null
+          is_active?: boolean
+          payment_type?: Database["public"]["Enums"]["payment_type"] | null
+          priority?: Database["public"]["Enums"]["task_priority"]
+          proposals_count?: number
+          selected_proposal_id?: string | null
+          status?: Database["public"]["Enums"]["task_status"]
+          student_id?: string
+          subject?: string
+          teacher_id?: string | null
+          title?: string
+          topic_tags?: string[] | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_selected_proposal"
+            columns: ["selected_proposal_id"]
+            isOneToOne: false
+            referencedRelation: "proposals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       teachers: {
         Row: {
           accepts_long_term: boolean | null
@@ -301,8 +747,8 @@ export type Database = {
           repeat_client_rate?: number | null
           response_time_hours?: number | null
           sample_work_urls?: string[] | null
-          specialties: string[]
-          subjects: string[]
+          specialties?: string[]
+          subjects?: string[]
           success_rate?: number | null
           tax_id?: string | null
           teaching_experience_years?: number | null
@@ -373,10 +819,31 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      create_missing_profiles: { Args: never; Returns: undefined }
+      create_notification: {
+        Args: {
+          p_link?: string
+          p_message: string
+          p_metadata?: Json
+          p_title: string
+          p_type: string
+          p_user_id: string
+        }
+        Returns: string
+      }
+      is_admin: { Args: { user_id: string }; Returns: boolean }
     }
     Enums: {
-      [_ in never]: never
+      payment_type: "per_hour" | "fixed" | "negotiable"
+      proposal_status: "pending" | "accepted" | "rejected" | "withdrawn"
+      task_priority: "low" | "normal" | "high" | "urgent"
+      task_status:
+        | "open"
+        | "in_progress"
+        | "submitted"
+        | "completed"
+        | "cancelled"
+        | "disputed"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -502,10 +969,19 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
-    Enums: {},
+    Enums: {
+      payment_type: ["per_hour", "fixed", "negotiable"],
+      proposal_status: ["pending", "accepted", "rejected", "withdrawn"],
+      task_priority: ["low", "normal", "high", "urgent"],
+      task_status: [
+        "open",
+        "in_progress",
+        "submitted",
+        "completed",
+        "cancelled",
+        "disputed",
+      ],
+    },
   },
 } as const

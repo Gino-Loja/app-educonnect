@@ -32,9 +32,20 @@ export async function updateSession(request: NextRequest) {
         data: { user },
     } = await supabase.auth.getUser()
 
-    // If user is authenticated and trying to access auth pages, redirect to workspace
-    // BUT allow access to update-password even if authenticated
+    // Get user role if authenticated
+    let userRole: string | null = null
+    if (user) {
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', user.id)
+            .single()
 
+        userRole = profile?.role || null
+    }
+
+    // If user is authenticated and trying to access auth pages, redirect based on role
+    // BUT allow access to update-password even if authenticated
     if (
         user &&
         (request.nextUrl.pathname.startsWith('/login') ||
@@ -42,6 +53,21 @@ export async function updateSession(request: NextRequest) {
          request.nextUrl.pathname.startsWith('/signup')) &&
         !request.nextUrl.pathname.startsWith('/update-password') // 👈 Permitir update-password
     ) {
+        const url = request.nextUrl.clone()
+        // Redirect admins to /admin, others to /workspace
+        url.pathname = userRole === 'admin' ? '/admin' : '/workspace'
+        return NextResponse.redirect(url)
+    }
+
+    // If admin tries to access /workspace, redirect to /admin
+    if (user && userRole === 'admin' && request.nextUrl.pathname.startsWith('/workspace')) {
+        const url = request.nextUrl.clone()
+        url.pathname = '/admin'
+        return NextResponse.redirect(url)
+    }
+
+    // If non-admin tries to access /admin, redirect to /workspace
+    if (user && userRole !== 'admin' && request.nextUrl.pathname.startsWith('/admin')) {
         const url = request.nextUrl.clone()
         url.pathname = '/workspace'
         return NextResponse.redirect(url)

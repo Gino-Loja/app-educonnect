@@ -1,6 +1,5 @@
 import { createClient } from "@/utils/supabase/server"
 import ProfileForm from "./_template/ProfileForm"
-import { redirect } from "next/navigation"
 
 export default async function RootLayout({
     children,
@@ -28,8 +27,6 @@ export default async function RootLayout({
 
     }
 
-    const role = data.user.user_metadata.role
-
     const { data: profileUser, error: profileError } = await supabase.from('profiles').select('*').eq('id', data.user.id).single()
 
     if (profileError) {
@@ -45,13 +42,29 @@ export default async function RootLayout({
 
     }
 
-    if (profileUser.onboarding_completed ) {
-        redirect('/workspace/')
+    // if (profileUser.onboarding_completed ) {
+    //     redirect('/workspace/')
+    // }
+
+    // Preparar los datos iniciales del perfil
+    const initialData = {
+        name: profileUser.name || '',
+        lastname: profileUser.lastname || '',
+        phone: profileUser.phone || '',
+        date_of_birth: profileUser.date_of_birth || '',
+        gender: profileUser.gender || '',
+        country: profileUser.country || '',
+        profile_picture_url: profileUser.profile_picture_url || '',
+        website_url: profileUser.website_url || '',
+        linkedin_url: profileUser.linkedin_url || '',
+        city: profileUser.city || '',
+        state: profileUser.state || '',
+        bio: profileUser.bio || '',
     }
 
     return (
         <>
-            <ProfileForm profileId={data.user.id} />
+            <ProfileForm profileId={data.user.id} initialData={initialData} />
         </>
     )
 }

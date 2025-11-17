@@ -7,7 +7,7 @@ import { createClient } from '@/utils/supabase/server'
 import { loginSchema, registerSchema } from '../validation/auth-schema'
 
 export async function login(
-  prevState: any,
+  prevState: unknown,
   formData: FormData,
 ) {
   const supabase = await createClient()
@@ -19,7 +19,6 @@ export async function login(
     password: formData.get("password"),
   })
 
-  console.log(parsed)
 
   if (!parsed.success) {
     // Retornamos los errores para mostrarlos en el formulario
@@ -49,7 +48,7 @@ export async function login(
 
 }
 
-export async function signup(prevState: any, formData: FormData) {
+export async function signup(prevState: unknown, formData: FormData) {
   const supabase = await createClient()
 
   const parsed = registerSchema.safeParse({

@@ -44,8 +44,8 @@ const LoginPage = () => {
     undefined
   )
 
-  console.log(state)
   return (
+    
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
       <div className="max-w-6xl w-full grid lg:grid-cols-2 gap-8 items-center">
 

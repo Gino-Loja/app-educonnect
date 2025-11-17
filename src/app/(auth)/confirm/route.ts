@@ -10,7 +10,6 @@ export async function GET(request: NextRequest) {
   const _next = searchParams.get('next')
   const next = _next && _next.startsWith('/') ? '/' : _next || '/'
 
-  console.log(searchParams)
 
 
   if (token_hash && type) {
