@@ -262,10 +262,15 @@ export async function deleteProposal(proposalId: string): Promise<ActionState> {
   }
 }
 
+type ProposalStatusFilter =
+  | Database["public"]["Enums"]["proposal_status"]
+  | "all"
+  | "task_cancelled"
+
 export async function getMyProposals(options?: {
   page?: number
   limit?: number
-  status?: Database["public"]["Enums"]["proposal_status"] | "all"
+  status?: ProposalStatusFilter
 }): Promise<{ proposals: Proposal[]; total: number }> {
   try {
     const supabase = await createClient()
@@ -302,11 +307,19 @@ export async function getMyProposals(options?: {
       .eq("teacher_id", user.id)
       .order("created_at", { ascending: false })
 
-    if (options?.status && options.status !== "all") {
+    const filteringCancelledTasks = options?.status === "task_cancelled"
+
+    if (options?.status && options.status !== "all" && options.status !== "task_cancelled") {
       query = query.eq("status", options.status)
-    } else {
+    } else if (!filteringCancelledTasks) {
       // By default, exclude withdrawn proposals
       query = query.neq("status", "withdrawn")
+    }
+
+    if (filteringCancelledTasks) {
+      query = query.eq("task.status", "cancelled")
+    } else {
+      query = query.neq("task.status", "cancelled")
     }
 
     const { data, error, count } = await query.range(offset, offset + limit - 1)
@@ -370,7 +383,7 @@ export async function getProposalById(proposalId: string): Promise<Proposal | nu
 export async function getReceivedProposals(options?: {
   page?: number
   limit?: number
-  status?: Database["public"]["Enums"]["proposal_status"] | "all"
+  status?: Database["public"]["Enums"]["proposal_status"] | "all" | "task_cancelled"
   taskId?: string
 }): Promise<{ proposals: Proposal[]; total: number }> {
   try {
@@ -389,7 +402,7 @@ export async function getReceivedProposals(options?: {
     // First get all task IDs belonging to the student
     const { data: userTasks, error: tasksError } = await supabase
       .from("tasks")
-      .select("id")
+      .select("id, status")
       .eq("student_id", user.id)
 
     if (tasksError) {
@@ -397,12 +410,17 @@ export async function getReceivedProposals(options?: {
       return { proposals: [], total: 0 }
     }
 
-    const taskIds = userTasks?.map(t => t.id) || []
-
-    if (taskIds.length === 0) {
-      return { proposals: [], total: 0 }
-    }
-
+    const taskGroups = (userTasks || []).reduce(
+      (groups, task) => {
+        if (task.status === "cancelled") {
+          groups.cancelled.push(task.id)
+        } else {
+          groups.active.push(task.id)
+        }
+        return groups
+      },
+      { active: [] as string[], cancelled: [] as string[] },
+    )
 
     let query = supabase
       .from("proposals")
@@ -425,14 +443,21 @@ export async function getReceivedProposals(options?: {
           profile_picture_url
         )
       `, { count: "exact" })
-      .in("task_id", taskIds)
       .order("created_at", { ascending: false })
+
+    const useCancelledTasks = options?.status === "task_cancelled"
+    const targetTaskIds = useCancelledTasks ? taskGroups.cancelled : taskGroups.active
 
     if (options?.taskId) {
       query = query.eq("task_id", options.taskId)
+    } else {
+      if (targetTaskIds.length === 0) {
+        return { proposals: [], total: 0 }
+      }
+      query = query.in("task_id", targetTaskIds)
     }
 
-    if (options?.status && options.status !== "all") {
+    if (options?.status && options.status !== "all" && options.status !== "task_cancelled") {
       query = query.eq("status", options.status)
     }
 

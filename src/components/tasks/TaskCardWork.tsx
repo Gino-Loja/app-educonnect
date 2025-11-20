@@ -1,17 +1,17 @@
 "use client"
 
-import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import { Card, CardContent, CardFooter } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import {
   IconCalendar,
-  IconClock,
   IconCash,
-  IconFileUpload,
+  IconClock,
   IconEye,
+  IconPlus,
+  IconFileUpload,
 } from "@tabler/icons-react"
-import { Database } from "@/model/schema"
+import type { Database } from "@/model/schema"
 import { formatDistanceToNow } from "date-fns"
 import { es } from "date-fns/locale/es"
 
@@ -41,25 +41,20 @@ interface TaskCardWorkProps {
   onSubmitWork?: (taskId: string) => void
 }
 
-const statusConfig = {
-  in_progress: { label: "En Progreso", variant: "default" as const, color: "text-blue-600" },
-  submitted: { label: "Enviado", variant: "secondary" as const, color: "text-purple-600" },
-  completed: { label: "Completado", variant: "outline" as const, color: "text-green-600" },
+const statusStyles: Record<string, string> = {
+  in_progress: "bg-blue-50 text-blue-600",
+  submitted: "bg-purple-50 text-purple-600",
+  completed: "bg-emerald-50 text-emerald-600",
 }
 
-const priorityConfig = {
-  low: { label: "Baja", color: "text-gray-600" },
+const priorityStyles: Record<Database["public"]["Enums"]["task_priority"], { label: string; color: string }> = {
+  low: { label: "Baja", color: "text-slate-500" },
   normal: { label: "Normal", color: "text-blue-600" },
   high: { label: "Alta", color: "text-orange-600" },
   urgent: { label: "Urgente", color: "text-red-600" },
 }
 
-export function TaskCardWork({
-  task,
-  selectedProposal,
-  onViewDetails,
-  onSubmitWork,
-}: TaskCardWorkProps) {
+export function TaskCardWork({ task, selectedProposal, onViewDetails, onSubmitWork }: TaskCardWorkProps) {
   const studentName = task.student?.name || "Estudiante"
   const studentInitials = studentName
     .split(" ")
@@ -68,121 +63,119 @@ export function TaskCardWork({
     .toUpperCase()
     .slice(0, 2)
 
-  const statusInfo = statusConfig[task.status as keyof typeof statusConfig] || statusConfig.in_progress
-  const priorityInfo = priorityConfig[task.priority]
+  const statusClass = statusStyles[task.status] ?? statusStyles.in_progress
+  const priorityInfo = priorityStyles[task.priority] ?? priorityStyles.normal
 
-  const daysUntilDue = task.due_date
-    ? Math.ceil((new Date(task.due_date).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))
-    : null
+  const dueLabel =
+    task.due_date &&
+    formatDistanceToNow(new Date(task.due_date), {
+      addSuffix: true,
+      locale: es,
+    })
 
-  const isOverdue = daysUntilDue !== null && daysUntilDue < 0
-  const isUrgent = daysUntilDue !== null && daysUntilDue <= 2 && daysUntilDue >= 0
+  const statusLabel =
+    task.status === "in_progress"
+      ? "En Progreso"
+      : task.status === "submitted"
+        ? "Entregado"
+        : task.status === "completed"
+          ? "Completado"
+          : "En curso"
 
   return (
-    <Card className="hover:shadow-md transition-shadow">
-      <CardHeader className="space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-lg line-clamp-2">{task.title}</h3>
-            <div className="flex items-center gap-2 mt-1">
-              <Badge variant="outline" className="text-xs">
-                {task.subject}
-              </Badge>
-              <Badge variant="outline" className="text-xs">
-                {task.academic_level}
-              </Badge>
+    <Card className="flex h-full flex-col rounded-xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg">
+      <CardContent className="flex flex-1 flex-col gap-4 p-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <h3 className="text-base font-semibold text-slate-900 line-clamp-2">{task.title}</h3>
+            <div className="flex flex-wrap gap-1.5 text-[0.7rem] font-medium text-slate-600">
+              <span className="rounded-full bg-slate-100 px-2.5 py-0.5">{task.subject}</span>
+              <span className="rounded-full bg-slate-100 px-2.5 py-0.5">{task.academic_level}</span>
             </div>
           </div>
-          <Badge variant={statusInfo.variant} className={statusInfo.color}>
-            {statusInfo.label}
-          </Badge>
+          <span className={`inline-flex rounded-full px-3 py-1 text-[0.7rem] font-semibold ${statusClass}`}>
+            {statusLabel}
+          </span>
         </div>
 
         <div className="flex items-center gap-3">
-          <Avatar className="h-10 w-10">
+          <Avatar className="h-10 w-10 border border-slate-100">
             <AvatarImage src={task.student?.profile_picture_url || undefined} />
-            <AvatarFallback className="bg-blue-100 text-blue-700">
-              {studentInitials}
-            </AvatarFallback>
+            <AvatarFallback className="bg-blue-100 text-blue-700">{studentInitials}</AvatarFallback>
           </Avatar>
           <div>
-            <p className="text-sm font-medium">{studentName}</p>
+            <p className="text-sm font-semibold text-slate-900">{studentName}</p>
             <p className="text-xs text-muted-foreground">Cliente</p>
           </div>
         </div>
-      </CardHeader>
 
-      <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground line-clamp-2">
-          {task.description}
-        </p>
+        <p className="text-sm text-slate-600 line-clamp-2">{task.description}</p>
 
-        <div className="grid grid-cols-2 gap-3">
-          {selectedProposal && (
-            <>
-              <div className="flex items-center gap-2 text-sm">
-                <IconCash className="h-4 w-4 text-muted-foreground" />
-                <div>
-                  <p className="text-xs text-muted-foreground">Acordado</p>
-                  <p className="font-semibold">${selectedProposal.proposed_amount}</p>
-                </div>
-              </div>
-              {selectedProposal.estimated_hours && (
-                <div className="flex items-center gap-2 text-sm">
-                  <IconClock className="h-4 w-4 text-muted-foreground" />
-                  <div>
-                    <p className="text-xs text-muted-foreground">Horas estimadas</p>
-                    <p className="font-semibold">{selectedProposal.estimated_hours}h</p>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
+        <div className="h-px bg-slate-100" />
 
+        <div className="space-y-2 text-sm">
           {task.due_date && (
-            <div className="flex items-center gap-2 text-sm col-span-2">
-              <IconCalendar className={`h-4 w-4 ${isOverdue ? "text-red-600" : isUrgent ? "text-orange-600" : "text-muted-foreground"}`} />
+            <div className="flex items-center gap-2.5">
+              <IconCalendar className="h-4 w-4 text-blue-500" />
               <div>
-                <p className="text-xs text-muted-foreground">Fecha límite</p>
-                <p className={`font-semibold ${isOverdue ? "text-red-600" : isUrgent ? "text-orange-600" : ""}`}>
-                  {formatDistanceToNow(new Date(task.due_date), {
-                    addSuffix: true,
-                    locale: es,
-                  })}
-                </p>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">Fecha límite</p>
+                <p className="font-semibold text-slate-900">{dueLabel}</p>
               </div>
             </div>
           )}
-        </div>
 
-        <div className="flex items-center gap-2 pt-2 border-t">
-          <span className={`text-xs font-medium ${priorityInfo.color}`}>
-            Prioridad: {priorityInfo.label}
-          </span>
+          {selectedProposal && (
+            <div className="flex flex-wrap gap-4">
+              <div className="flex items-center gap-2">
+                <IconCash className="h-4 w-4 text-emerald-500" />
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Monto acordado</p>
+                  <p className="font-semibold">${selectedProposal.proposed_amount}</p>
+                </div>
+              </div>
+              {selectedProposal.estimated_hours ? (
+                <div className="flex items-center gap-2">
+                  <IconClock className="h-4 w-4 text-slate-500" />
+                  <div>
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Horas estimadas</p>
+                    <p className="font-semibold">{selectedProposal.estimated_hours}h</p>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between rounded-lg bg-slate-50 px-2 py-2">
+            <div className="text-[0.65rem] uppercase tracking-wide text-muted-foreground">Prioridad</div>
+            <span className={`text-sm font-semibold ${priorityInfo.color}`}>{priorityInfo.label}</span>
+          </div>
         </div>
       </CardContent>
 
-      <CardFooter className="gap-2 flex-wrap">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => onViewDetails?.(task.id)}
-          className="flex-1"
-        >
-          <IconEye className="h-4 w-4 mr-1" />
+      <CardFooter className="flex flex-col gap-2 items-center justify-center border-t border-slate-100 sm:flex-row">
+        <Button variant="outline" size="sm" onClick={() => onViewDetails?.(task.id)}>
+          <IconEye className="h-4 w-4" />
           Ver Detalles
         </Button>
-        {task.status === "in_progress" && (
-          <Button
-            variant="default"
-            size="sm"
-            onClick={() => onSubmitWork?.(task.id)}
-            className="flex-1"
-          >
-            <IconFileUpload className="h-4 w-4 mr-1" />
-            Enviar Trabajo
-          </Button>
-        )}
+
+        <Button
+          size="sm"
+          className="flex-1 bg-blue-600 text-white hover:bg-blue-700"
+          onClick={() => onSubmitWork?.(task.id)}
+          disabled={task.status !== "in_progress"}
+        >
+          {task.status === "in_progress" ? (
+            <>
+              <IconPlus className="h-4 w-4" />
+              Enviar Trabajo
+            </>
+          ) : (
+            <>
+              <IconFileUpload className="h-4 w-4" />
+              Enviar Trabajo
+            </>
+          )}
+        </Button>
       </CardFooter>
     </Card>
   )

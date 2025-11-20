@@ -745,8 +745,8 @@ export async function getAssignedTasks(options?: {
     if (options?.status && options.status !== "all") {
       query = query.eq("status", options.status)
     } else {
-      // By default show only in_progress and submitted tasks
-      query = query.in("status", ["in_progress", "submitted"])
+      // Default view hides cancelled work unless explicitly requested
+      query = query.neq("status", "cancelled")
     }
 
     const { data, error, count } = await query.range(offset, offset + pageSize - 1)

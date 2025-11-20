@@ -10,15 +10,23 @@ interface Props {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }
 
+const allowedStatuses = ["pending", "accepted", "rejected", "withdrawn", "task_cancelled"] as const
+type AllowedStatus = (typeof allowedStatuses)[number]
+
+const isAllowedStatus = (value: string): value is AllowedStatus => {
+  return allowedStatuses.includes(value as AllowedStatus)
+}
+
 export default async function MisPropuestasPage({ searchParams }: Props) {
   const params = await searchParams
   const page = Number(params.page) || 1
-  const status = (params.status as string) || "all"
+  const rawStatus = (params.status as string) || "all"
+  const status: AllowedStatus | "all" = isAllowedStatus(rawStatus) ? rawStatus : "all"
 
   const result = await getMyProposals({
     page,
     limit: 12,
-    status: status === "all" ? "all" : (status as "pending" | "accepted" | "rejected" | "withdrawn"),
+    status,
   })
 
   const stats = {

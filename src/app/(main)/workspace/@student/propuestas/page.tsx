@@ -15,7 +15,7 @@ export default async function PropuestasPage({ searchParams }: Props) {
   const result = await getReceivedProposals({
     page,
     limit: 10,
-    status: status === "all" ? undefined : status as any,
+    status: status as any,
   })
 
   // Get student name for watermark
@@ -37,6 +37,18 @@ export default async function PropuestasPage({ searchParams }: Props) {
     rejected: result.proposals.filter(p => p.status === "rejected").length,
     withdrawn: result.proposals.filter(p => p.status === "withdrawn").length,
   }
+
+  const emptyStateMessages: Record<string, string> = {
+    pending: "No hay propuestas pendientes",
+    accepted: "No hay propuestas aceptadas",
+    rejected: "No hay propuestas rechazadas",
+    withdrawn: "No hay propuestas retiradas",
+    task_cancelled: "No tienes tareas canceladas",
+  }
+
+  const emptyMessage = status === "all"
+    ? "No has recibido propuestas aún"
+    : emptyStateMessages[status] || "No hay propuestas con este filtro"
 
   return (
     <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6 px-4 lg:px-6">
@@ -87,9 +99,7 @@ export default async function PropuestasPage({ searchParams }: Props) {
       {result.proposals.length === 0 ? (
         <div className="rounded-lg border p-12 text-center">
           <p className="text-muted-foreground">
-            {status === "all"
-              ? "No has recibido propuestas aún"
-              : `No hay propuestas con estado "${status}"`}
+            {emptyMessage}
           </p>
         </div>
       ) : (

@@ -17,6 +17,32 @@ const initialState: ActionState = {
   message: "",
 }
 
+const MAX_SUBMISSION_IMAGES = 5
+const MAX_SUBMISSION_IMAGE_SIZE_MB = 5
+const MAX_SUBMISSION_IMAGE_SIZE_BYTES = MAX_SUBMISSION_IMAGE_SIZE_MB * 1024 * 1024
+const SUBMISSION_BUCKET = "task-progress"
+const ALLOWED_IMAGE_MIME_TYPES = ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]
+const ALLOWED_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif"]
+
+const isValidSubmissionImage = (file: File) => {
+  if (file.type) {
+    if (file.type.startsWith("image/") || ALLOWED_IMAGE_MIME_TYPES.includes(file.type)) {
+      return true
+    }
+  }
+
+  const extension = file.name.split(".").pop()?.toLowerCase() ?? ""
+  return ALLOWED_IMAGE_EXTENSIONS.includes(extension)
+}
+
+const resolveImageExtension = (file: File) => {
+  return (
+    file.name.split(".").pop()?.toLowerCase() ||
+    file.type.split("/").pop()?.toLowerCase() ||
+    "jpg"
+  )
+}
+
 export async function createSubmission(
   prevState: ActionState | null,
   formData: FormData
@@ -318,17 +344,61 @@ export async function submitWork(formData: FormData): Promise<ActionState> {
       return { status: "error", message: "No autenticado" }
     }
 
-    const taskId = formData.get("task_id") as string
-    const description = formData.get("description") as string
-    const imageCount = parseInt(formData.get("image_count") as string)
+    const taskIdValue = formData.get("task_id")
+    const descriptionValue = formData.get("description")
+    const imageCountValue = formData.get("image_count")
+
+    const taskId = typeof taskIdValue === "string" ? taskIdValue : ""
+    const description = typeof descriptionValue === "string" ? descriptionValue.trim() : ""
+    const imageCount = typeof imageCountValue === "string" ? parseInt(imageCountValue, 10) : 0
 
     // Validate
     if (!taskId || !description || description.length < 20) {
       return { status: "error", message: "Datos inválidos" }
     }
 
-    if (imageCount < 1 || imageCount > 5) {
-      return { status: "error", message: "Debes subir entre 1 y 5 imágenes" }
+    if (!Number.isFinite(imageCount) || imageCount < 1 || imageCount > MAX_SUBMISSION_IMAGES) {
+      return {
+        status: "error",
+        message: `Debes subir entre 1 y ${MAX_SUBMISSION_IMAGES} imágenes`,
+      }
+    }
+
+    const files: File[] = []
+    for (let i = 0; i < imageCount; i++) {
+      const file = formData.get(`image_${i}`)
+      if (file instanceof File) {
+        files.push(file)
+      }
+    }
+
+    if (files.length === 0) {
+      return { status: "error", message: "Debes adjuntar al menos una imagen" }
+    }
+
+    if (files.length > MAX_SUBMISSION_IMAGES) {
+      return {
+        status: "error",
+        message: `Solo puedes adjuntar hasta ${MAX_SUBMISSION_IMAGES} imágenes`,
+      }
+    }
+
+    const invalidFile = files.find((file) => !isValidSubmissionImage(file))
+    if (invalidFile) {
+      return {
+        status: "error",
+        message: `Solo se permiten imágenes (${ALLOWED_IMAGE_EXTENSIONS
+          .map((ext) => ext.toUpperCase())
+          .join(", ")})`,
+      }
+    }
+
+    const tooLargeFile = files.find((file) => file.size > MAX_SUBMISSION_IMAGE_SIZE_BYTES)
+    if (tooLargeFile) {
+      return {
+        status: "error",
+        message: `Cada imagen debe pesar menos de ${MAX_SUBMISSION_IMAGE_SIZE_MB}MB`,
+      }
     }
 
     // Check if task exists and user is the teacher
@@ -362,20 +432,14 @@ export async function submitWork(formData: FormData): Promise<ActionState> {
     }
 
     // Upload images to Supabase Storage
-    const imageUrls: string[] = []
-    const bucket = "task-submissions" // Make sure this bucket exists in Supabase Storage
+    const uploadedImages: { path: string; publicUrl: string }[] = []
 
-    for (let i = 0; i < imageCount; i++) {
-      const imageFile = formData.get(`image_${i}`) as File
-      if (!imageFile) continue
+    for (const [index, imageFile] of files.entries()) {
+      const fileExt = resolveImageExtension(imageFile)
+      const fileName = `${taskId}/${Date.now()}_${index}.${fileExt}`
 
-      // Generate unique filename
-      const fileExt = imageFile.name.split(".").pop()
-      const fileName = `${taskId}/${Date.now()}_${i}.${fileExt}`
-
-      // Upload to Supabase Storage
       const { data: uploadData, error: uploadError } = await supabase.storage
-        .from(bucket)
+        .from(SUBMISSION_BUCKET)
         .upload(fileName, imageFile, {
           cacheControl: "3600",
           upsert: false,
@@ -383,20 +447,19 @@ export async function submitWork(formData: FormData): Promise<ActionState> {
 
       if (uploadError) {
         console.error("Error uploading image:", uploadError)
-        // Clean up already uploaded images
-        for (const url of imageUrls) {
-          const path = url.split("/").slice(-2).join("/")
-          await supabase.storage.from(bucket).remove([path])
+        if (uploadedImages.length > 0) {
+          await supabase.storage
+            .from(SUBMISSION_BUCKET)
+            .remove(uploadedImages.map((file) => file.path))
         }
         return { status: "error", message: "Error al subir las imágenes" }
       }
 
-      // Get public URL
       const { data: { publicUrl } } = supabase.storage
-        .from(bucket)
+        .from(SUBMISSION_BUCKET)
         .getPublicUrl(uploadData.path)
 
-      imageUrls.push(publicUrl)
+      uploadedImages.push({ path: uploadData.path, publicUrl })
     }
 
     // Create submission record
@@ -406,16 +469,16 @@ export async function submitWork(formData: FormData): Promise<ActionState> {
         task_id: taskId,
         teacher_id: user.id,
         content: description,
-        attachments: imageUrls,
+        attachments: uploadedImages.map((file) => file.publicUrl),
         is_final: false,
       })
 
     if (insertError) {
       console.error("Error creating submission:", insertError)
-      // Clean up uploaded images
-      for (const url of imageUrls) {
-        const path = url.split("/").slice(-2).join("/")
-        await supabase.storage.from(bucket).remove([path])
+      if (uploadedImages.length > 0) {
+        await supabase.storage
+          .from(SUBMISSION_BUCKET)
+          .remove(uploadedImages.map((file) => file.path))
       }
       return { status: "error", message: "Error al crear la entrega" }
     }

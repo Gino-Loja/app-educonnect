@@ -31,7 +31,8 @@ export function ProposalsFilterSelect({ defaultValue }: { defaultValue: string }
         <SelectItem value="pending">Pendientes</SelectItem>
         <SelectItem value="accepted">Aceptadas</SelectItem>
         <SelectItem value="rejected">Rechazadas</SelectItem>
-        <SelectItem value="withdrawn">Canceladas</SelectItem>
+        <SelectItem value="withdrawn">Propuestas retiradas</SelectItem>
+        <SelectItem value="task_cancelled">Tareas canceladas</SelectItem>
       </SelectContent>
     </Select>
   )
