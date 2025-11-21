@@ -99,7 +99,14 @@ export async function getMilestonesByTaskId(taskId: string) {
   try {
     const { data, error } = await supabase
       .from("payment_milestones")
-      .select("*")
+      .select(`
+        *,
+        tasks (
+          id,
+          title,
+          status
+        )
+      `)
       .eq("task_id", taskId)
       .order("milestone_number", { ascending: true })
 
@@ -227,6 +234,7 @@ export async function getStudentPaymentMilestones() {
         tasks!inner (
           id,
           title,
+          status,
           student_id
         )
       `)

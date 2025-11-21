@@ -11,6 +11,13 @@ import {
 } from "@/components/ui/sheet"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
@@ -22,9 +29,9 @@ import {
   IconCloudUpload,
   IconInfoCircle,
 } from "@tabler/icons-react"
-import { submitWork } from "@/lib/data/submission-actions"
 import { toast } from "sonner"
 import { Spinner } from "@/components/ui/spinner"
+import { Skeleton } from "@/components/ui/skeleton"
 import Image from "next/image"
 import { cn } from "@/lib/utils"
 
@@ -33,6 +40,21 @@ const MAX_IMAGE_SIZE_MB = 5
 const MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024
 const ACCEPTED_IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "webp", "heic", "heif"]
 const ACCEPTED_IMAGE_FORMATS_LABEL = "JPG, JPEG, PNG, WEBP o HEIC"
+
+type SubmitResponse = {
+  status: "success" | "error"
+  message: string
+}
+
+type MilestoneOption = {
+  id: string
+  milestone_number: number
+  title: string
+  amount: number
+  status: string
+  submission_id: string | null
+  due_date: string | null
+}
 
 interface SubmitWorkSheetProps {
   taskId: string
@@ -65,6 +87,10 @@ export function SubmitWorkSheet({
 }: SubmitWorkSheetProps) {
   const router = useRouter()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const [milestones, setMilestones] = useState<MilestoneOption[]>([])
+  const [milestonesLoading, setMilestonesLoading] = useState(false)
+  const [milestonesError, setMilestonesError] = useState<string | null>(null)
+  const [selectedMilestoneId, setSelectedMilestoneId] = useState("")
   const [description, setDescription] = useState("")
   const [images, setImages] = useState<File[]>([])
   const [previewUrls, setPreviewUrls] = useState<string[]>([])
@@ -81,6 +107,46 @@ export function SubmitWorkSheet({
 
   useEffect(() => {
     if (!open) {
+      return
+    }
+
+    let isMounted = true
+    const loadMilestones = async () => {
+      setMilestonesLoading(true)
+      setMilestonesError(null)
+      try {
+        const response = await fetch(`/api/tasks/${taskId}/milestones`, { cache: "no-store" })
+        const data = await response.json()
+        if (!response.ok) {
+          throw new Error(data.error || "No se pudieron obtener los hitos")
+        }
+        if (!isMounted) return
+        const fetched: MilestoneOption[] = data.milestones ?? []
+        setMilestones(fetched)
+        const firstPending = fetched.find((milestone) => !milestone.submission_id)
+        setSelectedMilestoneId(firstPending?.id ?? "")
+      } catch (error) {
+        if (!isMounted) return
+        setMilestones([])
+        setSelectedMilestoneId("")
+        setMilestonesError(
+          error instanceof Error ? error.message : "No se pudieron cargar los hitos"
+        )
+      } finally {
+        if (isMounted) {
+          setMilestonesLoading(false)
+        }
+      }
+    }
+
+    loadMilestones()
+    return () => {
+      isMounted = false
+    }
+  }, [open, taskId])
+
+  useEffect(() => {
+    if (!open) {
       setPreviewUrls((prev) => {
         prev.forEach((url) => URL.revokeObjectURL(url))
         return []
@@ -89,12 +155,16 @@ export function SubmitWorkSheet({
       setDescription("")
       setConfirmQuality(false)
       setConfirmInstructions(false)
+      setMilestones([])
+      setMilestonesError(null)
+      setSelectedMilestoneId("")
       if (fileInputRef.current) {
         fileInputRef.current.value = ""
       }
     }
   }, [open])
 
+  const pendingMilestones = milestones.filter((milestone) => !milestone.submission_id)
   const remainingSlots = MAX_IMAGES - images.length
   const totalSizeBytes = images.reduce((acc, file) => acc + file.size, 0)
   const progress = Math.min((images.length / MAX_IMAGES) * 100, 100)
@@ -156,6 +226,14 @@ export function SubmitWorkSheet({
       return
     }
 
+    if (!selectedMilestoneId) {
+      toast.error("Selecciona el hito que estás entregando")
+      return
+    }
+    if (!selectedMilestoneId) {
+      toast.error("Selecciona el hito que está s entregando")
+      return
+    }
     setIsSubmitting(true)
 
     try {
@@ -166,10 +244,15 @@ export function SubmitWorkSheet({
         formData.append(`image_${index}`, image)
       })
       formData.append("image_count", images.length.toString())
+      formData.append("milestone_id", selectedMilestoneId)
 
-      const result = await submitWork(formData)
+      const response = await fetch("/api/task-progress", {
+        method: "POST",
+        body: formData,
+      })
+      const result = (await response.json()) as SubmitResponse
 
-      if (result.status === "success") {
+      if (response.ok && result.status === "success") {
         toast.success(result.message)
         onOpenChange(false)
         router.refresh()
@@ -178,9 +261,12 @@ export function SubmitWorkSheet({
         setPreviewUrls([])
         setConfirmQuality(false)
         setConfirmInstructions(false)
-        fileInputRef.current && (fileInputRef.current.value = "")
+        setSelectedMilestoneId("")
+        if (fileInputRef.current) {
+          fileInputRef.current.value = ""
+        }
       } else {
-        toast.error(result.message)
+        toast.error(result.message || "No se pudo enviar el trabajo")
       }
     } catch (error) {
       console.error("Error submitting work:", error)
@@ -201,6 +287,7 @@ export function SubmitWorkSheet({
     description.trim().length >= 20 &&
     confirmQuality &&
     confirmInstructions &&
+    Boolean(selectedMilestoneId) &&
     !isSubmitting
 
   return (
@@ -246,6 +333,68 @@ export function SubmitWorkSheet({
             </CardContent>
           </Card>
 
+          <div className="space-y-3 rounded-2xl border border-muted/40 bg-background/70 p-4 shadow-sm">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <Label className="text-sm font-semibold">
+                  Hito de pago asociado <span className="text-red-500">*</span>
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Entrega parcial alineada con tu plan de pagos.
+                </p>
+              </div>
+              <Badge variant="outline" className="rounded-full">
+                {pendingMilestones.length} pendiente{pendingMilestones.length === 1 ? "" : "s"}
+              </Badge>
+            </div>
+            {milestonesLoading ? (
+              <Skeleton className="h-10 w-full rounded-xl" />
+            ) : pendingMilestones.length > 0 ? (
+              <Select value={selectedMilestoneId} onValueChange={setSelectedMilestoneId}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Selecciona el hito para esta entrega" />
+                </SelectTrigger>
+                <SelectContent>
+                  {pendingMilestones.map((milestone) => (
+                    <SelectItem key={milestone.id} value={milestone.id}>
+                      {`Hito ${milestone.milestone_number}: ${milestone.title}`} · $
+                      {milestone.amount.toFixed(2)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Todos los hitos tienen entregas registradas.
+              </p>
+            )}
+            {milestonesError && (
+              <p className="text-xs text-destructive">{milestonesError}</p>
+            )}
+            {milestones.length > 0 && (
+              <div className="grid gap-2 text-xs text-muted-foreground">
+                {milestones.map((milestone) => (
+                  <div
+                    key={milestone.id}
+                    className="flex items-center justify-between rounded-xl border border-dashed px-3 py-2"
+                  >
+                    <div>
+                      <p className="font-semibold text-foreground">
+                        Hito {milestone.milestone_number}
+                      </p>
+                      <p className="text-[11px]">{milestone.title}</p>
+                    </div>
+                    <Badge
+                      variant={milestone.submission_id ? "default" : "outline"}
+                      className="rounded-full"
+                    >
+                      {milestone.submission_id ? "Entrega registrada" : "Pendiente"}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="space-y-3">
             <div className="flex items-center gap-2">
               <Label className="flex items-center gap-1">
@@ -449,3 +598,13 @@ export function SubmitWorkSheet({
     </Sheet>
   )
 }
+
+
+
+
+
+
+
+
+
+

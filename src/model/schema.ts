@@ -502,6 +502,48 @@ export type Database = {
           },
         ]
       }
+      submission_comments: {
+        Row: {
+          author_id: string
+          author_role: string
+          created_at: string
+          id: string
+          message: string
+          submission_id: string
+        }
+        Insert: {
+          author_id: string
+          author_role: string
+          created_at?: string
+          id?: string
+          message: string
+          submission_id: string
+        }
+        Update: {
+          author_id?: string
+          author_role?: string
+          created_at?: string
+          id?: string
+          message?: string
+          submission_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "submission_comments_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "submission_comments_submission_id_fkey"
+            columns: ["submission_id"]
+            isOneToOne: false
+            referencedRelation: "task_submissions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       task_submissions: {
         Row: {
           attachments: Json | null
@@ -511,6 +553,7 @@ export type Database = {
           is_approved: boolean | null
           is_final: boolean
           notes: string | null
+          review_status: Database["public"]["Enums"]["submission_review_status"]
           reviewed_at: string | null
           student_feedback: string | null
           submitted_at: string
@@ -527,6 +570,7 @@ export type Database = {
           is_approved?: boolean | null
           is_final?: boolean
           notes?: string | null
+          review_status?: Database["public"]["Enums"]["submission_review_status"]
           reviewed_at?: string | null
           student_feedback?: string | null
           submitted_at?: string
@@ -543,6 +587,7 @@ export type Database = {
           is_approved?: boolean | null
           is_final?: boolean
           notes?: string | null
+          review_status?: Database["public"]["Enums"]["submission_review_status"]
           reviewed_at?: string | null
           student_feedback?: string | null
           submitted_at?: string
@@ -836,6 +881,10 @@ export type Database = {
     Enums: {
       payment_type: "per_hour" | "fixed" | "negotiable"
       proposal_status: "pending" | "accepted" | "rejected" | "withdrawn"
+      submission_review_status:
+        | "pending_review"
+        | "changes_requested"
+        | "approved"
       task_priority: "low" | "normal" | "high" | "urgent"
       task_status:
         | "open"
@@ -973,6 +1022,11 @@ export const Constants = {
     Enums: {
       payment_type: ["per_hour", "fixed", "negotiable"],
       proposal_status: ["pending", "accepted", "rejected", "withdrawn"],
+      submission_review_status: [
+        "pending_review",
+        "changes_requested",
+        "approved",
+      ],
       task_priority: ["low", "normal", "high", "urgent"],
       task_status: [
         "open",

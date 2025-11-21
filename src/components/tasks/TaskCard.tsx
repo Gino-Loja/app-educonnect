@@ -116,11 +116,18 @@ function TaskCardContent({
   const isCancelled = task.status === "cancelled"
 
   return (
-    <div className={`p-6 rounded-xl border h-full flex flex-col hover:shadow-lg transition-shadow ${
-      isCancelled
-        ? "bg-slate-100 dark:bg-slate-900/50 border-slate-300 dark:border-slate-700 opacity-75"
-        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700"
-    } ${clickable ? 'cursor-pointer' : ''}`}>
+    <div
+      className={`relative p-6 rounded-xl border h-full flex flex-col hover:shadow-lg transition-shadow ${
+        isCancelled
+          ? "bg-red-50/80 dark:bg-red-900/20 border-red-200/80 dark:border-red-800/50 text-red-900 dark:text-red-100"
+          : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700"
+      } ${clickable ? "cursor-pointer" : ""}`}
+    >
+      {isCancelled && (
+        <div className="absolute -top-2 left-6 rounded-full bg-red-500 px-3 py-1 text-xs font-semibold text-white shadow-sm">
+          Cancelada
+        </div>
+      )}
       {/* Header: Title, Description */}
       <div className="flex justify-between items-start gap-3 mb-3">
         <div className="flex-1 min-w-0">

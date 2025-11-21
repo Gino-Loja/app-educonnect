@@ -16,13 +16,21 @@ import { UploadPaymentProofDialog } from "./UploadPaymentProofDialog"
 import { TaskMilestonesDialog } from "./TaskMilestonesDialog"
 import { IconEye } from "@tabler/icons-react"
 
+type MilestoneWithTask = PaymentMilestone & {
+  tasks?: {
+    title?: string | null
+    status?: string | null
+  }
+}
+
 interface Props {
-  milestones: PaymentMilestone[]
+  milestones: MilestoneWithTask[]
 }
 
 interface GroupedTask {
   taskId: string
   taskTitle: string
+  taskStatus: string
   milestones: PaymentMilestone[]
   totalAmount: number
   paidAmount: number
@@ -42,15 +50,17 @@ export function StudentPaymentsTable({ milestones }: Props) {
   const groupedTasks = useMemo(() => {
     const taskMap = new Map<string, GroupedTask>()
 
-    milestones.forEach((milestone: any) => {
+    milestones.forEach((milestone) => {
       const taskId = milestone.task_id
       const taskTitle = milestone.tasks?.title || "Tarea"
+      const taskStatus = milestone.tasks?.status || "open"
 
       if (!taskMap.has(taskId)) {
         taskMap.set(taskId, {
           taskId,
           taskTitle,
           milestones: [],
+          taskStatus,
           totalAmount: 0,
           paidAmount: 0,
           pendingAmount: 0,
@@ -62,6 +72,7 @@ export function StudentPaymentsTable({ milestones }: Props) {
       }
 
       const group = taskMap.get(taskId)!
+      group.taskStatus = taskStatus || group.taskStatus
       group.milestones.push(milestone)
       group.totalAmount += milestone.amount
       group.milestonesCount++
@@ -115,8 +126,13 @@ export function StudentPaymentsTable({ milestones }: Props) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {groupedTasks.map((task) => (
-              <TableRow key={task.taskId}>
+            {groupedTasks.map((task) => {
+              const isCancelled = task.taskStatus === "cancelled"
+              return (
+              <TableRow
+                key={task.taskId}
+                className={isCancelled ? "bg-red-50/70 text-red-900" : undefined}
+              >
                 <TableCell className="font-medium">{task.taskTitle}</TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2">
@@ -148,6 +164,11 @@ export function StudentPaymentsTable({ milestones }: Props) {
                         {task.pendingPaymentCount} por pagar
                       </Badge>
                     )}
+                    {isCancelled && (
+                      <Badge variant="destructive" className="w-fit bg-red-600 text-white">
+                        Tarea cancelada
+                      </Badge>
+                    )}
                     {task.pendingVerificationCount > 0 && (
                       <Badge variant="secondary" className="w-fit">
                         {task.pendingVerificationCount} en verificación
@@ -165,13 +186,14 @@ export function StudentPaymentsTable({ milestones }: Props) {
                     size="sm"
                     variant="outline"
                     onClick={() => setSelectedTask(task)}
+                    disabled={isCancelled || (selectedTask?.taskId === task.taskId && isCancelled)}
                   >
                     <IconEye className="h-4 w-4 mr-2" />
-                    Ver Hitos
+                    {isCancelled ? "Cancelada" : "Ver Hitos"}
                   </Button>
                 </TableCell>
               </TableRow>
-            ))}
+            )})}
           </TableBody>
         </Table>
       </div>

@@ -6,6 +6,12 @@ import { createSubmissionSchema, updateSubmissionSchema } from "@/lib/validation
 import type { Database } from "@/model/schema"
 
 type TaskSubmission = Database["public"]["Tables"]["task_submissions"]["Row"]
+export type SubmissionComment = Database["public"]["Tables"]["submission_comments"]["Row"] & {
+  author?: {
+    name: string | null
+    profile_picture_url: string | null
+  }
+}
 
 export type ActionState = {
   status: "error" | "success"
@@ -120,6 +126,7 @@ export async function createSubmission(
         content: validation.data.submission_text,
         attachments: validation.data.submission_files_urls || null,
         is_final: false,
+        review_status: "pending_review",
       })
 
     if (insertError) {
@@ -222,6 +229,10 @@ export async function updateSubmission(
     if (validation.data.submission_files_urls !== undefined) {
       updateData.submission_files_urls = validation.data.submission_files_urls
     }
+    // Reset review markers when teacher updates a submission
+    updateData.review_status = "pending_review"
+    updateData.is_approved = null
+    updateData.reviewed_at = null
 
     const { error: updateError } = await supabase
       .from("task_submissions")
@@ -338,7 +349,6 @@ export async function submitWork(formData: FormData): Promise<ActionState> {
   try {
     const supabase = await createClient()
 
-    // Verify user is authenticated
     const { data: { user }, error: authError } = await supabase.auth.getUser()
     if (authError || !user) {
       return { status: "error", message: "No autenticado" }
@@ -347,14 +357,19 @@ export async function submitWork(formData: FormData): Promise<ActionState> {
     const taskIdValue = formData.get("task_id")
     const descriptionValue = formData.get("description")
     const imageCountValue = formData.get("image_count")
+    const milestoneIdValue = formData.get("milestone_id")
 
     const taskId = typeof taskIdValue === "string" ? taskIdValue : ""
     const description = typeof descriptionValue === "string" ? descriptionValue.trim() : ""
     const imageCount = typeof imageCountValue === "string" ? parseInt(imageCountValue, 10) : 0
+    const milestoneId = typeof milestoneIdValue === "string" ? milestoneIdValue : ""
 
-    // Validate
     if (!taskId || !description || description.length < 20) {
       return { status: "error", message: "Datos inválidos" }
+    }
+
+    if (!milestoneId) {
+      return { status: "error", message: "Debes seleccionar un hito de pago" }
     }
 
     if (!Number.isFinite(imageCount) || imageCount < 1 || imageCount > MAX_SUBMISSION_IMAGES) {
@@ -401,10 +416,9 @@ export async function submitWork(formData: FormData): Promise<ActionState> {
       }
     }
 
-    // Check if task exists and user is the teacher
     const { data: task, error: taskError } = await supabase
       .from("tasks")
-      .select("id, status, teacher_id, student_id, title")
+      .select("id, status, teacher_id")
       .eq("id", taskId)
       .single()
 
@@ -416,22 +430,39 @@ export async function submitWork(formData: FormData): Promise<ActionState> {
       return { status: "error", message: "No tienes permiso para entregar esta tarea" }
     }
 
-    if (task.status !== "in_progress") {
+    if (task.status !== "in_progress" && task.status !== "submitted") {
       return { status: "error", message: "Solo puedes entregar tareas en progreso" }
     }
 
-    // Check if submission already exists
-    const { data: existingSubmission } = await supabase
-      .from("task_submissions")
-      .select("id")
-      .eq("task_id", taskId)
-      .maybeSingle()
+    const { data: milestone, error: milestoneError } = await supabase
+      .from("payment_milestones")
+      .select("id, task_id, submission_id, milestone_number, title")
+      .eq("id", milestoneId)
+      .single()
 
-    if (existingSubmission) {
-      return { status: "error", message: "Ya existe una entrega para esta tarea" }
+    if (milestoneError || !milestone) {
+      return { status: "error", message: "Hito de pago no encontrado" }
     }
 
-    // Upload images to Supabase Storage
+    if (milestone.task_id !== taskId) {
+      return { status: "error", message: "El hito no pertenece a esta tarea" }
+    }
+
+    let existingSubmissionStatus: string | null = null
+    if (milestone.submission_id) {
+      const { data: existingSubmission } = await supabase
+        .from("task_submissions")
+        .select("review_status")
+        .eq("id", milestone.submission_id)
+        .maybeSingle()
+
+      existingSubmissionStatus = existingSubmission?.review_status ?? null
+
+      if (existingSubmissionStatus !== "changes_requested") {
+        return { status: "error", message: "Este hito ya tiene una entrega registrada" }
+      }
+    }
+
     const uploadedImages: { path: string; publicUrl: string }[] = []
 
     for (const [index, imageFile] of files.entries()) {
@@ -455,15 +486,14 @@ export async function submitWork(formData: FormData): Promise<ActionState> {
         return { status: "error", message: "Error al subir las imágenes" }
       }
 
-      const { data: { publicUrl } } = supabase.storage
-        .from(SUBMISSION_BUCKET)
-        .getPublicUrl(uploadData.path)
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from(SUBMISSION_BUCKET).getPublicUrl(uploadData.path)
 
       uploadedImages.push({ path: uploadData.path, publicUrl })
     }
 
-    // Create submission record
-    const { error: insertError } = await supabase
+    const { data: insertedSubmission, error: insertError } = await supabase
       .from("task_submissions")
       .insert({
         task_id: taskId,
@@ -471,9 +501,13 @@ export async function submitWork(formData: FormData): Promise<ActionState> {
         content: description,
         attachments: uploadedImages.map((file) => file.publicUrl),
         is_final: false,
+        version: milestone.milestone_number,
+        review_status: "pending_review",
       })
+      .select("id")
+      .single()
 
-    if (insertError) {
+    if (insertError || !insertedSubmission) {
       console.error("Error creating submission:", insertError)
       if (uploadedImages.length > 0) {
         await supabase.storage
@@ -483,7 +517,24 @@ export async function submitWork(formData: FormData): Promise<ActionState> {
       return { status: "error", message: "Error al crear la entrega" }
     }
 
-    // Update task status to 'submitted'
+    const submissionId = insertedSubmission.id
+
+    const { error: milestoneLinkError } = await supabase
+      .from("payment_milestones")
+      .update({ submission_id: submissionId })
+      .eq("id", milestoneId)
+
+    if (milestoneLinkError) {
+      console.error("Error linking submission to milestone:", milestoneLinkError)
+      await supabase.from("task_submissions").delete().eq("id", submissionId)
+      if (uploadedImages.length > 0) {
+        await supabase.storage
+          .from(SUBMISSION_BUCKET)
+          .remove(uploadedImages.map((file) => file.path))
+      }
+      return { status: "error", message: "No se pudo asociar la entrega al hito" }
+    }
+
     const { error: updateTaskError } = await supabase
       .from("tasks")
       .update({ status: "submitted" })
@@ -496,14 +547,15 @@ export async function submitWork(formData: FormData): Promise<ActionState> {
     revalidatePath("/workspace/mis-trabajos")
     revalidatePath("/workspace/mis-tareas")
 
-    return { status: "success", message: "Trabajo entregado exitosamente" }
+    return {
+      status: "success",
+      message: `Entrega enviada para ${milestone.title}`,
+    }
   } catch (error) {
     console.error("Unexpected error submitting work:", error)
     return { status: "error", message: "Error inesperado al enviar el trabajo" }
   }
-}
-
-/**
+}/**
  * Approve a submission (student action)
  */
 export async function approveSubmission(submissionId: string): Promise<ActionState> {
@@ -523,6 +575,7 @@ export async function approveSubmission(submissionId: string): Promise<ActionSta
         id,
         task_id,
         is_approved,
+        review_status,
         task:tasks!inner (
           id,
           student_id,
@@ -544,13 +597,13 @@ export async function approveSubmission(submissionId: string): Promise<ActionSta
       return { status: "error", message: "No tienes permiso para aprobar esta entrega" }
     }
 
-    // Verify task is in submitted state
-    if (task.status !== "submitted") {
+    // Allow approval while la tarea está marcada como 'submitted' o sigue "en progreso" por otros hitos
+    if (task.status !== "submitted" && task.status !== "in_progress") {
       return { status: "error", message: "Solo puedes aprobar entregas pendientes" }
     }
 
     // Check if already approved
-    if (submission.is_approved === true) {
+    if (submission.is_approved === true || submission.review_status === "approved") {
       return { status: "error", message: "Esta entrega ya fue aprobada" }
     }
 
@@ -560,6 +613,7 @@ export async function approveSubmission(submissionId: string): Promise<ActionSta
       .update({
         is_approved: true,
         reviewed_at: new Date().toISOString(),
+        review_status: "approved",
       })
       .eq("id", submissionId)
 
@@ -568,10 +622,11 @@ export async function approveSubmission(submissionId: string): Promise<ActionSta
       return { status: "error", message: "Error al aprobar la entrega" }
     }
 
-    // Update task status to completed
+    // Update task status based on remaining milestones
+    const nextStatus = await determineTaskStatusFromMilestones(supabase, submission.task_id)
     const { error: updateTaskError } = await supabase
       .from("tasks")
-      .update({ status: "completed" })
+      .update({ status: nextStatus })
       .eq("id", submission.task_id)
 
     if (updateTaskError) {
@@ -649,6 +704,7 @@ export async function rejectSubmission(
         is_approved: false,
         reviewed_at: new Date().toISOString(),
         student_feedback: feedback,
+        review_status: "changes_requested",
       })
       .eq("id", submissionId)
 
@@ -674,6 +730,165 @@ export async function rejectSubmission(
   } catch (error) {
     console.error("Unexpected error rejecting submission:", error)
     return { status: "error", message: "Error inesperado al rechazar el trabajo" }
+  }
+}
+
+/**
+ * Get threaded comments for a submission
+ */
+export async function getSubmissionComments(
+  submissionId: string
+): Promise<{ comments: SubmissionComment[]; error?: string }> {
+  try {
+    const supabase = await createClient()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      return { comments: [], error: "No autenticado" }
+    }
+
+    const { data: submission, error: submissionError } = await supabase
+      .from("task_submissions")
+      .select(`
+        id,
+        task:tasks (
+          student_id,
+          teacher_id
+        )
+      `)
+      .eq("id", submissionId)
+      .single()
+
+    if (submissionError || !submission) {
+      return { comments: [], error: "Entrega no encontrada" }
+    }
+
+    const task = Array.isArray(submission.task) ? submission.task[0] : submission.task
+    const isParticipant = task?.student_id === user.id || task?.teacher_id === user.id
+
+    if (!isParticipant) {
+      return { comments: [], error: "No tienes permisos para ver los comentarios" }
+    }
+
+    const { data, error } = await supabase
+      .from("submission_comments")
+      .select(`
+        id,
+        submission_id,
+        author_id,
+        author_role,
+        message,
+        created_at,
+        author:profiles!submission_comments_author_id_fkey (
+          name,
+          profile_picture_url
+        )
+      `)
+      .eq("submission_id", submissionId)
+      .order("created_at", { ascending: true })
+
+    if (error) {
+      console.error("Error fetching submission comments:", error)
+      return { comments: [], error: "No se pudieron cargar los comentarios" }
+    }
+
+    return { comments: (data as SubmissionComment[]) ?? [] }
+  } catch (error) {
+    console.error("Unexpected error fetching submission comments:", error)
+    return { comments: [], error: "Error inesperado al cargar comentarios" }
+  }
+}
+
+/**
+ * Create a feedback comment for a submission
+ */
+export async function createSubmissionComment(
+  submissionId: string,
+  message: string
+): Promise<{ status: "error" | "success"; message: string; comment?: SubmissionComment }> {
+  try {
+    const supabase = await createClient()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      return { status: "error", message: "No autenticado" }
+    }
+
+    const cleanedMessage = message.trim()
+    if (cleanedMessage.length < 5) {
+      return { status: "error", message: "El comentario debe tener al menos 5 caracteres" }
+    }
+
+    const { data: submission, error: submissionError } = await supabase
+      .from("task_submissions")
+      .select(`
+        id,
+        task:tasks (
+          student_id,
+          teacher_id
+        )
+      `)
+      .eq("id", submissionId)
+      .single()
+
+    if (submissionError || !submission) {
+      return { status: "error", message: "Entrega no encontrada" }
+    }
+
+    const task = Array.isArray(submission.task) ? submission.task[0] : submission.task
+    const isStudent = task?.student_id === user.id
+    const isTeacher = task?.teacher_id === user.id
+
+    if (!isStudent && !isTeacher) {
+      return { status: "error", message: "No puedes comentar en esta entrega" }
+    }
+
+    const authorRole: SubmissionComment["author_role"] = isStudent ? "student" : "teacher"
+
+    const { data, error } = await supabase
+      .from("submission_comments")
+      .insert({
+        submission_id: submissionId,
+        author_id: user.id,
+        author_role: authorRole,
+        message: cleanedMessage,
+      })
+      .select(`
+        id,
+        submission_id,
+        author_id,
+        author_role,
+        message,
+        created_at,
+        author:profiles!submission_comments_author_id_fkey (
+          name,
+          profile_picture_url
+        )
+      `)
+      .single()
+
+    if (error || !data) {
+      console.error("Error creating submission comment:", error)
+      return { status: "error", message: "No se pudo guardar el comentario" }
+    }
+
+    revalidatePath("/workspace/mis-tareas")
+    revalidatePath("/workspace/mis-trabajos")
+
+    return {
+      status: "success",
+      message: "Comentario enviado al docente",
+      comment: data as SubmissionComment,
+    }
+  } catch (error) {
+    console.error("Unexpected error creating submission comment:", error)
+    return { status: "error", message: "Error inesperado al enviar el comentario" }
   }
 }
 
@@ -715,5 +930,57 @@ export async function getSubmissionByTaskId(taskId: string): Promise<{
   } catch (error) {
     console.error("Unexpected error fetching submission:", error)
     return { submission: null, error: "Error inesperado" }
+  }
+}
+
+async function determineTaskStatusFromMilestones(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  taskId: string
+) {
+  try {
+    const { data: milestones, error } = await supabase
+      .from("payment_milestones")
+      .select("submission_id")
+      .eq("task_id", taskId)
+
+    if (error || !milestones || milestones.length === 0) {
+      return "completed"
+    }
+
+    const submissionIds = milestones
+      .map((milestone) => milestone.submission_id)
+      .filter((id): id is string => Boolean(id))
+
+    let approvedIds = new Set<string>()
+    if (submissionIds.length > 0) {
+      const { data: submissions } = await supabase
+        .from("task_submissions")
+        .select("id, is_approved, review_status")
+        .in("id", submissionIds)
+
+      if (submissions) {
+        approvedIds = new Set(
+          submissions
+            .filter(
+              (submission) =>
+                submission.is_approved === true || submission.review_status === "approved"
+            )
+            .map((submission) => submission.id)
+        )
+      }
+    }
+
+    const pending = milestones.some((milestone) => {
+      if (!milestone.submission_id) {
+        return true
+      }
+
+      return !approvedIds.has(milestone.submission_id)
+    })
+
+    return pending ? "in_progress" : "completed"
+  } catch (error) {
+    console.error("Error determining task status from milestones:", error)
+    return "in_progress"
   }
 }

@@ -65,6 +65,7 @@ export function TaskCardWork({ task, selectedProposal, onViewDetails, onSubmitWo
 
   const statusClass = statusStyles[task.status] ?? statusStyles.in_progress
   const priorityInfo = priorityStyles[task.priority] ?? priorityStyles.normal
+  const isCancelled = task.status === "cancelled"
 
   const dueLabel =
     task.due_date &&
@@ -83,11 +84,22 @@ export function TaskCardWork({ task, selectedProposal, onViewDetails, onSubmitWo
           : "En curso"
 
   return (
-    <Card className="flex h-full flex-col rounded-xl border border-slate-200 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg">
+    <Card
+      className={`relative flex h-full flex-col rounded-xl border shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-lg ${
+        isCancelled
+          ? "border-red-200 bg-red-50/80 text-red-900 dark:border-red-800/40 dark:bg-red-950/30 dark:text-red-100"
+          : "border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900/40"
+      }`}
+    >
+      {isCancelled && (
+        <div className="absolute -top-2 left-4 rounded-full bg-red-500 px-3 py-1 text-xs font-semibold text-white shadow">
+          Cancelada
+        </div>
+      )}
       <CardContent className="flex flex-1 flex-col gap-4 p-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1 space-y-1.5">
-            <h3 className="text-base font-semibold text-slate-900 line-clamp-2">{task.title}</h3>
+            <h3 className="text-base font-semibold text-slate-900 line-clamp-2 dark:text-white">{task.title}</h3>
             <div className="flex flex-wrap gap-1.5 text-[0.7rem] font-medium text-slate-600">
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5">{task.subject}</span>
               <span className="rounded-full bg-slate-100 px-2.5 py-0.5">{task.academic_level}</span>

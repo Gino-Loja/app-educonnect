@@ -4,7 +4,6 @@ import { useState, useEffect, useTransition } from "react"
 import { Task } from "@/lib/data/task-actions"
 import { TaskCard } from "./TaskCard"
 import { SubmissionPreviewSheet } from "./SubmissionPreviewSheet"
-import { getSubmissionByTaskId } from "@/lib/data/submission-actions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -17,6 +16,7 @@ import {
 import { IconChevronLeft, IconChevronRight, IconSearch, IconEye } from "@tabler/icons-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
+import { MilestoneReviewSheet, MilestoneWithSubmission } from "./MilestoneReviewSheet"
 
 interface TasksListStudentProps {
   initialTasks: Task[]
@@ -42,6 +42,17 @@ const STATUS_OPTIONS = [
   { value: "disputed", label: "En disputa" },
 ]
 
+type SubmissionPreview = {
+  id: string
+  content: string
+  attachments: string[] | null
+  submitted_at: string
+  teacher?: {
+    name: string | null
+    profile_picture_url: string | null
+  }
+}
+
 export function TasksListStudent({
   initialTasks,
   initialTotal,
@@ -56,18 +67,32 @@ export function TasksListStudent({
   const [total, setTotal] = useState(initialTotal)
   const [currentPage, setCurrentPage] = useState(initialPage)
   const [isPending, startTransition] = useTransition()
+  const [milestoneSheetOpen, setMilestoneSheetOpen] = useState(false)
+  const [milestoneTaskTitle, setMilestoneTaskTitle] = useState("")
+  const [milestones, setMilestones] = useState<MilestoneWithSubmission[]>([])
+  const [milestonesLoading, setMilestonesLoading] = useState(false)
+  const [milestonesError, setMilestonesError] = useState<string | null>(null)
+  const [selectedTaskForMilestones, setSelectedTaskForMilestones] = useState<Task | null>(null)
+  const [previewMilestoneLabel, setPreviewMilestoneLabel] = useState<string | undefined>()
 
   // Filters
   const [statusFilter, setStatusFilter] = useState("all")
   const [searchQuery, setSearchQuery] = useState("")
 
   // Submission preview
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null)
-  const [submission, setSubmission] = useState<any | null>(null)
+  const [previewTask, setPreviewTask] = useState<Task | null>(null)
+  const [previewSubmission, setPreviewSubmission] = useState<SubmissionPreview | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
-  const [loadingSubmission, setLoadingSubmission] = useState(false)
 
   const totalPages = Math.ceil(total / initialPageSize)
+
+  const refreshCurrentPage = () => {
+    startTransition(async () => {
+      const result = await onPageChange(currentPage)
+      setTasks(result.tasks)
+      setTotal(result.total)
+    })
+  }
 
   const handlePageChange = (newPage: number) => {
     if (newPage < 1 || newPage > totalPages || isPending) return
@@ -94,29 +119,69 @@ export function TasksListStudent({
     })
   }
 
-  const handleViewSubmission = async (task: Task) => {
-    setLoadingSubmission(true)
+  const fetchMilestonesForTask = async (taskId: string) => {
+    setMilestonesLoading(true)
+    setMilestonesError(null)
     try {
-      const result = await getSubmissionByTaskId(task.id)
-
-      if (result.error) {
-        toast.error(result.error)
-        return
+      const response = await fetch(`/api/tasks/${taskId}/milestones`, { cache: "no-store" })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || "No se pudieron obtener los hitos")
       }
-
-      if (!result.submission) {
-        toast.error("No se encontró la entrega")
-        return
-      }
-
-      setSelectedTask(task)
-      setSubmission(result.submission)
-      setSheetOpen(true)
+      setMilestones(data.milestones ?? [])
     } catch (error) {
-      console.error("Error loading submission:", error)
-      toast.error("Error al cargar la entrega")
+      console.error("Error fetching milestones:", error)
+      setMilestones([])
+      setMilestonesError(
+        error instanceof Error ? error.message : "No se pudieron obtener los hitos"
+      )
     } finally {
-      setLoadingSubmission(false)
+      setMilestonesLoading(false)
+    }
+  }
+
+  const handleViewMilestones = async (task: Task) => {
+    setSelectedTaskForMilestones(task)
+    setMilestoneTaskTitle(task.title)
+    setMilestoneSheetOpen(true)
+    await fetchMilestonesForTask(task.id)
+  }
+
+  const handleReviewSubmission = (milestone: MilestoneWithSubmission) => {
+    if (!milestone.submission || !selectedTaskForMilestones) {
+      toast.error("Este hito aún no tiene entrega asociada")
+      return
+    }
+
+    setPreviewTask(selectedTaskForMilestones)
+    setPreviewSubmission(milestone.submission)
+    setPreviewMilestoneLabel(milestone.title || `Hito ${milestone.milestone_number}`)
+    setSheetOpen(true)
+  }
+
+  const handleMilestoneSheetChange = (open: boolean) => {
+    setMilestoneSheetOpen(open)
+    if (!open) {
+      setSelectedTaskForMilestones(null)
+      setMilestones([])
+      setMilestonesError(null)
+      setMilestoneTaskTitle("")
+    }
+  }
+
+  const handleSubmissionUpdated = () => {
+    refreshCurrentPage()
+    if (selectedTaskForMilestones) {
+      fetchMilestonesForTask(selectedTaskForMilestones.id)
+    }
+  }
+
+  const handleSheetChange = (open: boolean) => {
+    setSheetOpen(open)
+    if (!open) {
+      setPreviewTask(null)
+      setPreviewSubmission(null)
+      setPreviewMilestoneLabel(undefined)
     }
   }
 
@@ -203,20 +268,22 @@ export function TasksListStudent({
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {tasks.map((task) => (
               <TaskCard key={task.id} task={task}>
-                {/* Show "Ver Entrega" button if task is submitted */}
-                {task.status === "submitted" && (
+                {/* Milestone review button */}
+                {task.status !== "open" && (
                   <Button
-                    variant="default"
+                    variant="outline"
                     size="sm"
                     className="w-full"
                     onClick={(e) => {
                       e.stopPropagation()
-                      handleViewSubmission(task)
+                      handleViewMilestones(task)
                     }}
-                    disabled={loadingSubmission}
+                    disabled={
+                      milestonesLoading && selectedTaskForMilestones?.id === task.id
+                    }
                   >
                     <IconEye className="mr-2 h-4 w-4" />
-                    Ver Entrega
+                    Ver avances
                   </Button>
                 )}
               </TaskCard>
@@ -273,16 +340,52 @@ export function TasksListStudent({
         )}
       </div>
 
+      {selectedTaskForMilestones && (
+        <MilestoneReviewSheet
+          taskTitle={milestoneTaskTitle}
+          open={milestoneSheetOpen}
+          onOpenChange={handleMilestoneSheetChange}
+          milestones={milestones}
+          loading={milestonesLoading}
+          error={milestonesError}
+          onReviewSubmission={handleReviewSubmission}
+        />
+      )}
+
       {/* Submission Preview Modal */}
-      {selectedTask && submission && (
+      {previewTask && previewSubmission && (
         <SubmissionPreviewSheet
-          submission={submission}
-          taskTitle={selectedTask.title}
+          submission={previewSubmission}
+          taskTitle={previewTask.title}
+          milestoneTitle={previewMilestoneLabel}
           studentName={studentName}
           open={sheetOpen}
-          onOpenChange={setSheetOpen}
+          onOpenChange={handleSheetChange}
+          onSubmissionUpdated={(nextStatus, submissionId) => {
+            if (nextStatus && submissionId) {
+              setMilestones((prev) =>
+                prev.map((m) =>
+                  m.submission?.id === submissionId
+                    ? {
+                        ...m,
+                        submission: {
+                          ...(m.submission as any),
+                          review_status: nextStatus,
+                          is_approved: nextStatus === "approved",
+                        },
+                      }
+                    : m,
+                ),
+              )
+            }
+            handleSubmissionUpdated()
+          }}
         />
       )}
     </>
   )
 }
+
+
+
+
