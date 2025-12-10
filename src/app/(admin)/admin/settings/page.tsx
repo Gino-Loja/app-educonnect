@@ -19,30 +19,28 @@ export default async function AdminSettingsPage() {
     return (
       <div className="p-8">
         <div className="text-center text-muted-foreground">
-          Error al cargar la configuración
+          Error al cargar la configuracion
         </div>
       </div>
     )
   }
 
   return (
-    <div className="p-8 space-y-6">
+    <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Configuración</h1>
-        <p className="text-muted-foreground mt-2">
-          Administra la configuración financiera de la plataforma
+        <h3 className="text-lg font-medium">Parametros Financieros</h3>
+        <p className="text-sm text-muted-foreground">
+          Configura las tasas y cuentas de la plataforma.
         </p>
       </div>
-
       <Separator />
 
       <div className="grid gap-6">
-        {/* Commission Rate Section */}
-        <Card>
+        <Card className="border border-slate-200 shadow-sm">
           <CardHeader>
-            <CardTitle>Parámetros Financieros</CardTitle>
+            <CardTitle>Parametros Financieros</CardTitle>
             <CardDescription>
-              Configura la tasa de comisión que la plataforma retiene de cada transacción
+              Configura la tasa de comision que la plataforma retiene de cada transaccion
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -50,12 +48,11 @@ export default async function AdminSettingsPage() {
           </CardContent>
         </Card>
 
-        {/* Bank Account Section */}
-        <Card>
+        <Card className="border border-slate-200 shadow-sm">
           <CardHeader>
             <CardTitle>Cuenta Bancaria Principal</CardTitle>
             <CardDescription>
-              Información de la cuenta bancaria donde se reciben los pagos de la plataforma
+              Informacion de la cuenta bancaria donde se reciben los pagos de la plataforma
             </CardDescription>
           </CardHeader>
           <CardContent>

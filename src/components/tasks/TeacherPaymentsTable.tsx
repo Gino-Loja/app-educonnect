@@ -15,8 +15,18 @@ import { Button } from "@/components/ui/button"
 import { TaskMilestonesDialog } from "./TaskMilestonesDialog"
 import { IconEye } from "@tabler/icons-react"
 
+type PaymentMilestoneWithTask = PaymentMilestone & {
+  tasks?: {
+    title?: string | null
+    student?: {
+      name: string | null
+      email: string | null
+    } | null
+  }
+}
+
 interface Props {
-  milestones: PaymentMilestone[]
+  milestones: PaymentMilestoneWithTask[]
 }
 
 interface GroupedTask {
@@ -41,7 +51,7 @@ export function TeacherPaymentsTable({ milestones }: Props) {
   const groupedTasks = useMemo(() => {
     const taskMap = new Map<string, GroupedTask>()
 
-    milestones.forEach((milestone: any) => {
+    milestones.forEach((milestone) => {
       const taskId = milestone.task_id
       const taskTitle = milestone.tasks?.title || "Tarea"
       const student = milestone.tasks?.student

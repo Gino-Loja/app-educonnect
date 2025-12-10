@@ -7,13 +7,20 @@ import { SubmissionPreviewSheet } from "./SubmissionPreviewSheet"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { IconChevronLeft, IconChevronRight, IconSearch, IconEye } from "@tabler/icons-react"
+import { IconChevronLeft, IconChevronRight, IconSearch, IconEye, IconStar, IconStarFilled } from "@tabler/icons-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
 import { MilestoneReviewSheet, MilestoneWithSubmission } from "./MilestoneReviewSheet"
@@ -83,6 +90,12 @@ export function TasksListStudent({
   const [previewTask, setPreviewTask] = useState<Task | null>(null)
   const [previewSubmission, setPreviewSubmission] = useState<SubmissionPreview | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [previewMilestoneId, setPreviewMilestoneId] = useState<string | null>(null)
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
+  const [reviewTask, setReviewTask] = useState<Task | null>(null)
+  const [reviewRating, setReviewRating] = useState(0)
+  const [reviewLoading, setReviewLoading] = useState(false)
+  const [reviewSubmitting, setReviewSubmitting] = useState(false)
 
   const totalPages = Math.ceil(total / initialPageSize)
 
@@ -156,6 +169,7 @@ export function TasksListStudent({
     setPreviewTask(selectedTaskForMilestones)
     setPreviewSubmission(milestone.submission)
     setPreviewMilestoneLabel(milestone.title || `Hito ${milestone.milestone_number}`)
+    setPreviewMilestoneId(milestone.id)
     setSheetOpen(true)
   }
 
@@ -172,7 +186,10 @@ export function TasksListStudent({
   const handleSubmissionUpdated = () => {
     refreshCurrentPage()
     if (selectedTaskForMilestones) {
-      fetchMilestonesForTask(selectedTaskForMilestones.id)
+      // Add a small delay to ensure DB propagation
+      setTimeout(() => {
+        fetchMilestonesForTask(selectedTaskForMilestones.id)
+      }, 1000)
     }
   }
 
@@ -182,6 +199,55 @@ export function TasksListStudent({
       setPreviewTask(null)
       setPreviewSubmission(null)
       setPreviewMilestoneLabel(undefined)
+      setPreviewMilestoneId(null)
+    }
+  }
+
+  const handleOpenReview = (task: Task) => {
+    setReviewTask(task)
+    setReviewDialogOpen(true)
+    setReviewRating(0)
+    setReviewLoading(true)
+    fetch(`/api/reviews/teacher?teacherId=${task.teacher_id}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.myReview) {
+          setReviewRating(data.myReview.rating || 0)
+        }
+      })
+      .finally(() => setReviewLoading(false))
+  }
+
+  const handleSubmitReview = async () => {
+    if (!reviewTask) return
+    if (reviewRating < 1) {
+      toast.error("Selecciona una calificación")
+      return
+    }
+    setReviewSubmitting(true)
+    try {
+      const response = await fetch("/api/reviews/teacher", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          teacherId: reviewTask.teacher_id,
+          taskId: reviewTask.id,
+          rating: reviewRating,
+          comment: "",
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        toast.error(data.error || "No se pudo guardar la reseña")
+      } else {
+        toast.success("Reseña guardada")
+        setReviewDialogOpen(false)
+      }
+    } catch (error) {
+      console.error("Error submitting teacher review", error)
+      toast.error("Error al enviar la reseña")
+    } finally {
+      setReviewSubmitting(false)
     }
   }
 
@@ -286,6 +352,20 @@ export function TasksListStudent({
                     Ver avances
                   </Button>
                 )}
+                {task.status === "completed" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full border-amber-200 text-amber-700 hover:bg-amber-50"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleOpenReview(task)
+                    }}
+                  >
+                    <IconStar className="mr-2 h-4 w-4" />
+                    Calificar docente
+                  </Button>
+                )}
               </TaskCard>
             ))}
           </div>
@@ -358,6 +438,8 @@ export function TasksListStudent({
           submission={previewSubmission}
           taskTitle={previewTask.title}
           milestoneTitle={previewMilestoneLabel}
+          milestoneId={previewMilestoneId || undefined}
+          taskId={previewTask.id}
           studentName={studentName}
           open={sheetOpen}
           onOpenChange={handleSheetChange}
@@ -367,13 +449,13 @@ export function TasksListStudent({
                 prev.map((m) =>
                   m.submission?.id === submissionId
                     ? {
-                        ...m,
-                        submission: {
-                          ...(m.submission as any),
-                          review_status: nextStatus,
-                          is_approved: nextStatus === "approved",
-                        },
-                      }
+                      ...m,
+                      submission: {
+                        ...m.submission!,
+                        review_status: nextStatus,
+                        is_approved: nextStatus === "approved",
+                      },
+                    }
                     : m,
                 ),
               )
@@ -382,10 +464,57 @@ export function TasksListStudent({
           }}
         />
       )}
+
+      <Dialog open={reviewDialogOpen} onOpenChange={setReviewDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Calificar al docente</DialogTitle>
+            <DialogDescription>Comparte tu reseña sobre este docente.</DialogDescription>
+          </DialogHeader>
+          {reviewTask && (
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-semibold">{reviewTask.title}</p>
+                <p className="text-xs text-muted-foreground">
+                  Docente: {reviewTask.teacher?.name || "Docente"}
+                </p>
+              </div>
+              {reviewLoading ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    {[1, 2, 3, 4, 5].map((idx) => (
+                      <Skeleton key={idx} className="h-6 w-6 rounded-full" />
+                    ))}
+                  </div>
+                  <Skeleton className="h-20 w-full rounded-md" />
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    {[1, 2, 3, 4, 5].map((star) => {
+                      const active = reviewRating >= star
+                      const Icon = active ? IconStarFilled : IconStar
+                      return (
+                        <button
+                          key={star}
+                          type="button"
+                          className="p-1"
+                          onClick={() => setReviewRating(star)}
+                        >
+                          <Icon className={`h-6 w-6 ${active ? "text-amber-400" : "text-slate-300"}`} />
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <Button onClick={handleSubmitReview} disabled={reviewSubmitting || reviewLoading}>
+                    {reviewSubmitting ? "Enviando..." : "Guardar calificación"}
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
-
-
-
-

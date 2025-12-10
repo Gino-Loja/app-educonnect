@@ -12,7 +12,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 export default function SignupSelection() {
-  const [selectedLanguage, setSelectedLanguage] = useState('español');
+  const [selectedLanguage] = useState('español');
   const [hoveredCard, setHoveredCard] = useState<string | null>(null);
   const router = useRouter();
 
@@ -27,16 +27,14 @@ export default function SignupSelection() {
     description,
     icon: Icon,
     bgColor,
-    textColor,
-    avatar
+    textColor
   }: {
     type: string;
     title: string;
     description: string;
     icon: React.ElementType;
     bgColor: string;
-    textColor: string;
-    avatar: string;
+    textColor: string;
   }) => (
     <div
       className={`bg-white rounded-2xl p-8 shadow-lg border-2 border-transparent hover:border-blue-200 hover:shadow-xl transition-all duration-300 cursor-pointer transform hover:-translate-y-1 ${hoveredCard === type ? 'scale-100' : 'scale-100'
@@ -149,8 +147,7 @@ export default function SignupSelection() {
               description="Obtén ayuda personalizada de profesores expertos para resolver tus tareas y proyectos."
               icon={BookOpen}
               bgColor="bg-blue-600"
-              textColor="text-blue-600"
-              avatar="/api/placeholder/80/80"
+              textColor="text-blue-600"
             />
 
           </div>
@@ -165,8 +162,7 @@ export default function SignupSelection() {
               description="Comparte tu conocimiento ayudando estudiantes con tareas específicas en tu área de especialidad."
               icon={GraduationCap}
               bgColor="bg-purple-600"
-              textColor="text-purple-600"
-              avatar="/api/placeholder/80/80"
+              textColor="text-purple-600"
             />
           </div>
         </div>
@@ -230,4 +226,7 @@ export default function SignupSelection() {
     </div>
   );
 };
+
+
+
 

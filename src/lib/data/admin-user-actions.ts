@@ -2,6 +2,7 @@
 
 import { createClient } from "@/utils/supabase/server"
 import { revalidatePath } from "next/cache"
+import { Database } from "@/model/schema"
 
 export interface User {
   id: string
@@ -39,6 +40,7 @@ export async function getUsers(options?: {
   let query = supabase
     .from("profiles")
     .select("*", { count: "exact" })
+    .is("deleted_at", null)
     .order("created_at", { ascending: false })
 
   // Filter by role
@@ -92,12 +94,16 @@ export async function toggleUserStatus(userId: string): Promise<{
     // Get current status
     const { data: user, error: fetchError } = await supabase
       .from("profiles")
-      .select("is_active")
+      .select("is_active, deleted_at")
       .eq("id", userId)
       .single()
 
     if (fetchError || !user) {
       return { status: "error", message: "Usuario no encontrado" }
+    }
+
+    if (user.deleted_at) {
+      return { status: "error", message: "El usuario ya fue eliminado" }
     }
 
     // Toggle status
@@ -122,12 +128,68 @@ export async function toggleUserStatus(userId: string): Promise<{
   }
 }
 
+type StudentProfile = Database["public"]["Tables"]["students"]["Row"]
+type TeacherProfile = Database["public"]["Tables"]["teachers"]["Row"]
+
+export type UserDetail = User & {
+  student: StudentProfile | null
+  teacher: TeacherProfile | null
+}
+
+export async function getUserById(userId: string): Promise<{
+  status: "success" | "error"
+  message?: string
+  user?: UserDetail
+}> {
+  try {
+    const supabase = await createClient()
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select(
+        `
+        *,
+        student:students!students_id_fkey(*),
+        teacher:teachers!teachers_id_fkey(*)
+      `
+      )
+      .eq("id", userId)
+      .is("deleted_at", null)
+      .single()
+
+    if (error || !data) {
+      console.error("Error fetching user by id:", error)
+      return { status: "error", message: "Usuario no encontrado" }
+    }
+
+    return { status: "success", user: data as UserDetail }
+  } catch (error) {
+    console.error("Unexpected error fetching user:", error)
+    return { status: "error", message: "Error inesperado" }
+  }
+}
+
 export async function deleteUser(userId: string): Promise<{
   status: "success" | "error"
   message: string
 }> {
   try {
     const supabase = await createClient()
+
+    // Avoid deleting an already removed user
+    const { data: user, error: fetchError } = await supabase
+      .from("profiles")
+      .select("deleted_at")
+      .eq("id", userId)
+      .single()
+
+    if (fetchError || !user) {
+      return { status: "error", message: "Usuario no encontrado" }
+    }
+
+    if (user.deleted_at) {
+      return { status: "error", message: "El usuario ya fue eliminado" }
+    }
 
     // Soft delete by setting deleted_at
     const { error: updateError } = await supabase

@@ -3,6 +3,7 @@
 import { createClient } from "@/utils/supabase/server"
 import { revalidatePath } from "next/cache"
 import { createSubmissionSchema, updateSubmissionSchema } from "@/lib/validation/submission-schema"
+import { createNotification } from "@/lib/data/notification-actions"
 import type { Database } from "@/model/schema"
 
 type TaskSubmission = Database["public"]["Tables"]["task_submissions"]["Row"]
@@ -13,14 +14,13 @@ export type SubmissionComment = Database["public"]["Tables"]["submission_comment
   }
 }
 
+type SubmissionWithTeacher = TaskSubmission & {
+  teacher?: { name: string | null; profile_picture_url: string | null } | null
+}
+
 export type ActionState = {
   status: "error" | "success"
   message: string
-}
-
-const initialState: ActionState = {
-  status: "error",
-  message: "",
 }
 
 const MAX_SUBMISSION_IMAGES = 5
@@ -547,6 +547,20 @@ export async function submitWork(formData: FormData): Promise<ActionState> {
     revalidatePath("/workspace/mis-trabajos")
     revalidatePath("/workspace/mis-tareas")
 
+    // Notify teacher
+    await createNotification({
+      userId: task.teacher_id,
+      type: "task",
+      title: "Nueva entrega recibida",
+      message: `El estudiante ha enviado una entrega para el Hito ${milestone.milestone_number}: ${milestone.title}`,
+      link: `/workspace/mis-tareas?taskId=${taskId}&action=review&milestoneId=${milestoneId}`,
+      metadata: {
+        taskId,
+        milestoneId,
+        submissionId,
+      },
+    })
+
     return {
       status: "success",
       message: `Entrega enviada para ${milestone.title}`,
@@ -580,6 +594,11 @@ export async function approveSubmission(submissionId: string): Promise<ActionSta
           id,
           student_id,
           status,
+          title
+        ),
+        payment_milestone:payment_milestones (
+          id,
+          milestone_number,
           title
         )
       `)
@@ -635,6 +654,26 @@ export async function approveSubmission(submissionId: string): Promise<ActionSta
 
     revalidatePath("/workspace/mis-tareas")
     revalidatePath("/workspace/mis-trabajos")
+
+    // Notify student
+    const paymentMilestone = Array.isArray(submission.payment_milestone)
+      ? submission.payment_milestone[0]
+      : submission.payment_milestone
+
+    if (paymentMilestone) {
+      await createNotification({
+        userId: submission.task.student_id,
+        type: "task_approved",
+        title: "Entrega aprobada",
+        message: `Tu entrega para el Hito ${paymentMilestone.milestone_number} ha sido aprobada.`,
+        link: `/workspace/mis-trabajos?taskId=${submission.task_id}`,
+        metadata: {
+          taskId: submission.task_id,
+          submissionId,
+          milestoneId: paymentMilestone.id,
+        },
+      })
+    }
 
     return { status: "success", message: "Trabajo aprobado exitosamente" }
   } catch (error) {
@@ -692,9 +731,9 @@ export async function rejectSubmission(
       return { status: "error", message: "No tienes permiso para rechazar esta entrega" }
     }
 
-    // Verify task is in submitted state
-    if (task.status !== "submitted") {
-      return { status: "error", message: "Solo puedes rechazar entregas pendientes" }
+    // Verify task is in a valid state for rejection (submitted, in_progress, or completed)
+    if (!["submitted", "in_progress", "completed"].includes(task.status)) {
+      return { status: "error", message: "No se puede rechazar la entrega en el estado actual de la tarea" }
     }
 
     // Update submission
@@ -896,7 +935,7 @@ export async function createSubmissionComment(
  * Get submission for a task (for student to review)
  */
 export async function getSubmissionByTaskId(taskId: string): Promise<{
-  submission: any | null
+  submission: SubmissionWithTeacher | null
   error?: string
 }> {
   try {
@@ -926,7 +965,7 @@ export async function getSubmissionByTaskId(taskId: string): Promise<{
       return { submission: null, error: "Error al obtener la entrega" }
     }
 
-    return { submission: data }
+    return { submission: data as SubmissionWithTeacher }
   } catch (error) {
     console.error("Unexpected error fetching submission:", error)
     return { submission: null, error: "Error inesperado" }

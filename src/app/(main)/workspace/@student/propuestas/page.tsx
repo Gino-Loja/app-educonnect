@@ -1,7 +1,8 @@
 import { getReceivedProposals } from "@/lib/data/proposal-actions"
 import { ProposalsListStudent } from "@/components/tasks/ProposalsListStudent"
 import { ProposalsFilterSelect } from "@/components/tasks/ProposalsFilterSelect"
-import { createClient } from "@/utils/supabase/server"
+
+type ProposalStatusFilter = "all" | "pending" | "accepted" | "rejected" | "withdrawn" | "task_cancelled"
 
 interface Props {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
@@ -9,27 +10,15 @@ interface Props {
 
 export default async function PropuestasPage({ searchParams }: Props) {
   const params = await searchParams
-  const status = (params.status as string) || "all"
-  const page = Number(params.page) || 1
+  const status = (params.status as ProposalStatusFilter) || "all"
+  const page = Math.max(1, Number(params.page) || 1)
+  const pageSize = 15
 
   const result = await getReceivedProposals({
     page,
-    limit: 10,
-    status: status as any,
+    limit: pageSize,
+    status,
   })
-
-  // Get student name for watermark
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  let studentName = "Estudiante"
-  if (user) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("name")
-      .eq("id", user.id)
-      .single()
-    studentName = profile?.name || user.email?.split("@")[0] || "Estudiante"
-  }
 
   const stats = {
     pending: result.proposals.filter(p => p.status === "pending").length,
@@ -103,7 +92,13 @@ export default async function PropuestasPage({ searchParams }: Props) {
           </p>
         </div>
       ) : (
-        <ProposalsListStudent proposals={result.proposals} studentName={studentName} />
+        <ProposalsListStudent
+          proposals={result.proposals}
+          total={result.total}
+          currentPage={page}
+          pageSize={pageSize}
+          status={status}
+        />
       )}
 
       {/* Pagination would go here if needed */}

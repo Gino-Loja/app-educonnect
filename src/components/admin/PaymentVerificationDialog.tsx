@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useTransition } from "react"
+import Image from "next/image"
 import { useRouter } from "next/navigation"
 import type { PaymentMilestoneWithDetails } from "@/lib/data/payment-verification-actions"
 import {
@@ -166,20 +167,22 @@ export function PaymentVerificationDialog({ payment, open, onClose }: Props) {
           <div>
             <h3 className="text-sm font-semibold mb-2">Comprobante de Pago</h3>
             {payment.payment_proof_url ? (
-              <div className="space-y-2">
-                <a
-                  href={payment.payment_proof_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <div className="space-y-2">
+                  <a
+                    href={payment.payment_proof_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
                   className="flex items-center gap-2 text-sm text-blue-600 hover:underline"
                 >
                   <IconExternalLink className="h-4 w-4" />
                   Ver comprobante en nueva pestaña
                 </a>
                 <div className="rounded-lg border overflow-hidden">
-                  <img
+                  <Image
                     src={payment.payment_proof_url}
                     alt="Comprobante de pago"
+                    width={1200}
+                    height={675}
                     className="w-full h-auto"
                   />
                 </div>

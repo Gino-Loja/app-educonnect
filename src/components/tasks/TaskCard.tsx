@@ -117,11 +117,10 @@ function TaskCardContent({
 
   return (
     <div
-      className={`relative p-6 rounded-xl border h-full flex flex-col hover:shadow-lg transition-shadow ${
-        isCancelled
-          ? "bg-red-50/80 dark:bg-red-900/20 border-red-200/80 dark:border-red-800/50 text-red-900 dark:text-red-100"
-          : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700"
-      } ${clickable ? "cursor-pointer" : ""}`}
+      className={`relative p-6 rounded-xl border h-full flex flex-col hover:shadow-lg transition-shadow ${isCancelled
+        ? "bg-red-50/80 dark:bg-red-900/20 border-red-200/80 dark:border-red-800/50 text-red-900 dark:text-red-100"
+        : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700"
+        } ${clickable ? "cursor-pointer" : ""}`}
     >
       {isCancelled && (
         <div className="absolute -top-2 left-6 rounded-full bg-red-500 px-3 py-1 text-xs font-semibold text-white shadow-sm">
@@ -210,9 +209,27 @@ function TaskCardContent({
 
       {/* Due Date */}
       {task.due_date && (
-        <div className="flex items-center text-sm font-medium text-slate-600 dark:text-slate-400">
+        <div className="flex items-center text-sm font-medium text-slate-600 dark:text-slate-400 mb-3">
           <IconCalendar className="w-5 h-5 mr-2 text-slate-400 dark:text-slate-500" />
           <span>{formatDate(task.due_date)}</span>
+        </div>
+      )}
+
+      {/* Progress Bar */}
+      {task.progress && task.progress.total > 0 && (
+        <div className="mb-3">
+          <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-400 mb-1.5">
+            <span className="font-medium">Progreso de hitos</span>
+            <span className="font-semibold">
+              {task.progress.completed}/{task.progress.total} ({task.progress.percentage}%)
+            </span>
+          </div>
+          <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-blue-500 to-blue-600 dark:from-blue-400 dark:to-blue-500 transition-all duration-300 ease-out"
+              style={{ width: `${task.progress.percentage}%` }}
+            />
+          </div>
         </div>
       )}
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useActionState, useState } from 'react'
+import { useActionState, useEffect, useState } from 'react'
 import { updateProfile } from '@/lib/data/profile-actions'
 import { CheckCircle, Upload, X, User, MapPin, Globe, FileText, GraduationCap, Save } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -29,6 +29,12 @@ interface ProfileFormProps {
     compact?: boolean
 }
 
+type UpdateProfileState = {
+    status: "success" | "error"
+    message?: unknown
+    profilePictureUrl?: string | null
+}
+
 export default function ProfileForm({ profileId, initialData, compact = false }: ProfileFormProps) {
     const [state, formAction, isPending] = useActionState(
         updateProfile.bind(null, profileId),
@@ -39,6 +45,18 @@ export default function ProfileForm({ profileId, initialData, compact = false }:
         initialData?.profile_picture_url || null
     )
     const [selectedFile, setSelectedFile] = useState<File | null>(null)
+    const [lastSavedUrl, setLastSavedUrl] = useState<string | null>(initialData?.profile_picture_url || null)
+
+    // Si el server action devuelve una nueva URL, actualiza la vista previa
+    useEffect(() => {
+        if (!state || typeof state !== "object") return
+        const payload = state as UpdateProfileState
+        if (payload.status === "success" && payload.profilePictureUrl && payload.profilePictureUrl !== lastSavedUrl) {
+            setLastSavedUrl(payload.profilePictureUrl)
+            setImagePreview(payload.profilePictureUrl)
+            setSelectedFile(null)
+        }
+    }, [state, lastSavedUrl])
 
     const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
@@ -121,15 +139,15 @@ export default function ProfileForm({ profileId, initialData, compact = false }:
                             </h3>
                             <p className="text-blue-100 mt-1">Sube o actualiza tu imagen de perfil</p>
                         </div>
-                        
+
                         <div className="p-8">
                             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
                                 {/* Avatar Display */}
                                 <div className="flex justify-center lg:justify-start">
                                     <div className="relative">
                                         <Avatar className="w-40 h-40 border-4 border-white shadow-xl">
-                                            <AvatarImage 
-                                                src={imagePreview || undefined} 
+                                            <AvatarImage
+                                                src={imagePreview || undefined}
                                                 alt="Profile picture"
                                                 className="object-cover"
                                             />
@@ -219,7 +237,7 @@ export default function ProfileForm({ profileId, initialData, compact = false }:
                             </h3>
                             <p className="text-blue-100 mt-1">Datos básicos de tu perfil</p>
                         </div>
-                        
+
                         <div className="p-8">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="space-y-2">
@@ -317,7 +335,7 @@ export default function ProfileForm({ profileId, initialData, compact = false }:
                             </h3>
                             <p className="text-purple-100 mt-1">Detalles sobre tu ubicación actual</p>
                         </div>
-                        
+
                         <div className="p-8">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="space-y-2">
@@ -359,7 +377,7 @@ export default function ProfileForm({ profileId, initialData, compact = false }:
                             </h3>
                             <p className="text-green-100 mt-1">Conecta tus perfiles y sitios web</p>
                         </div>
-                        
+
                         <div className="p-8">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="space-y-2">
@@ -402,7 +420,7 @@ export default function ProfileForm({ profileId, initialData, compact = false }:
                             </h3>
                             <p className="text-orange-100 mt-1">Cuéntanos sobre ti y tus intereses</p>
                         </div>
-                        
+
                         <div className="p-8">
                             <div className="space-y-2">
                                 <Label htmlFor="bio" className="text-sm font-medium text-gray-700">
@@ -425,10 +443,10 @@ export default function ProfileForm({ profileId, initialData, compact = false }:
 
                     {/* Action Buttons */}
                     <div className="flex flex-col sm:flex-row gap-4 sm:justify-end pt-8 border-t border-gray-200">
-                       
-                        <Button 
-                            type="submit" 
-                            disabled={isPending} 
+
+                        <Button
+                            type="submit"
+                            disabled={isPending}
                             className=" py-3 px-6 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white font-medium shadow-lg shadow-blue-500/25 transition-all transform hover:scale-[1.02] disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
                         >
                             {isPending ? (

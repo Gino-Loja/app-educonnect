@@ -17,6 +17,7 @@ type Proposal = Database["public"]["Tables"]["proposals"]["Row"] & {
     budget_max: number | null
     status: Database["public"]["Enums"]["task_status"]
     student?: {
+      id?: string
       name: string | null
       profile_picture_url: string | null
     }
@@ -281,7 +282,7 @@ export async function getMyProposals(options?: {
     }
 
     const page = options?.page || 1
-    const limit = options?.limit || 10
+    const limit = options?.limit || 15
     const offset = (page - 1) * limit
 
     let query = supabase
@@ -299,6 +300,7 @@ export async function getMyProposals(options?: {
           budget_max,
           status,
           student:profiles!tasks_student_id_fkey (
+            id,
             name,
             profile_picture_url
           )
@@ -329,7 +331,51 @@ export async function getMyProposals(options?: {
       return { proposals: [], total: 0 }
     }
 
-    return { proposals: data || [], total: count || 0 }
+    let proposals = data || []
+
+    // Fallback: hydrate missing task titles if the relation came back empty/null
+    const missingTaskIds = proposals
+      .filter((p) => !p.task || !p.task.title)
+      .map((p) => p.task_id)
+    if (missingTaskIds.length > 0) {
+      const { data: missingTasks, error: missingTasksError } = await supabase
+        .from("tasks")
+        .select(`
+          id,
+          title,
+          description,
+          subject,
+          academic_level,
+          due_date,
+          budget_min,
+          budget_max,
+          status,
+          student:profiles!tasks_student_id_fkey (
+            id,
+            name,
+            profile_picture_url
+          )
+        `)
+        .in("id", missingTaskIds)
+
+      if (missingTasksError) {
+        console.error("Error hydrating missing task titles:", missingTasksError)
+      } else if (missingTasks && missingTasks.length > 0) {
+        const taskMap = new Map(missingTasks.map((task) => [task.id, task]))
+        proposals = proposals.map((proposal) => {
+          const fallbackTask = taskMap.get(proposal.task_id)
+          if (!proposal.task && fallbackTask) {
+            return { ...proposal, task: fallbackTask }
+          }
+          if (proposal.task && !proposal.task.title && fallbackTask) {
+            return { ...proposal, task: { ...proposal.task, ...fallbackTask } }
+          }
+          return proposal
+        })
+      }
+    }
+
+    return { proposals, total: count || 0 }
   } catch (error) {
     console.error("Unexpected error fetching proposals:", error)
     return { proposals: [], total: 0 }
@@ -360,6 +406,7 @@ export async function getProposalById(proposalId: string): Promise<Proposal | nu
           )
         ),
         teacher:profiles!proposals_teacher_id_fkey (
+          id,
           name,
           profile_picture_url
         )
@@ -396,7 +443,7 @@ export async function getReceivedProposals(options?: {
     }
 
     const page = options?.page || 1
-    const limit = options?.limit || 10
+    const limit = options?.limit || 15
     const offset = (page - 1) * limit
 
     // First get all task IDs belonging to the student
@@ -550,7 +597,7 @@ export async function acceptProposal(proposalId: string): Promise<ActionState> {
     }
 
     // Create payment milestones based on installments
-    const task = proposal.task as any
+    const task = proposal.task as { installments?: number | null } | null
     const installments = task?.installments || 1
     const totalAmount = proposal.proposed_amount
     const amountPerMilestone = totalAmount / installments

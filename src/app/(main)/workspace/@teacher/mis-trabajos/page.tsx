@@ -5,6 +5,9 @@ import { IconBriefcase } from "@tabler/icons-react"
 import { getAssignedTasks } from "@/lib/data/task-actions"
 import { TasksWorkList } from "@/components/tasks/TasksWorkList"
 import { TasksFilterSelect } from "@/components/tasks/TasksFilterSelect"
+import type { Database } from "@/model/schema"
+
+type TaskStatusFilter = Database["public"]["Enums"]["task_status"] | "all"
 
 interface Props {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
@@ -12,13 +15,13 @@ interface Props {
 
 export default async function MisTrabajosPage({ searchParams }: Props) {
   const params = await searchParams
-  const status = (params.status as string) || "all"
+  const status = (params.status as TaskStatusFilter) || "all"
   const page = Number(params.page) || 1
 
   const result = await getAssignedTasks({
     page,
     limit: 12,
-    status: status === "all" ? undefined : status as any,
+    status: status === "all" ? undefined : status,
   })
 
   const inProgressCount = result.tasks.filter(t => t.status === "in_progress").length

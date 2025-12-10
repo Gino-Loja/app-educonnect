@@ -33,10 +33,12 @@ export interface AdminTasksResponse {
   totalPages: number
 }
 
+type TaskStatus = Database["public"]["Enums"]["task_status"]
+
 export async function getAdminTasks(options?: {
   page?: number
   limit?: number
-  status?: string
+  status?: TaskStatus | "all"
   search?: string
 }): Promise<AdminTasksResponse> {
   const supabase = await createClient()
@@ -59,7 +61,7 @@ export async function getAdminTasks(options?: {
 
   // Filter by status
   if (options?.status && options.status !== "all") {
-    query = query.eq("status", options.status)
+    query = query.eq("status", options.status satisfies TaskStatus)
   }
 
   // Search by title

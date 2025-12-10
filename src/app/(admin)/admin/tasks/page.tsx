@@ -1,4 +1,5 @@
 import { getAdminTasks } from "@/lib/data/admin-task-actions"
+import type { Database } from "@/model/schema"
 import { TasksTable } from "@/components/admin/TasksTable"
 import { TasksFilters } from "@/components/admin/TasksFilters"
 
@@ -9,13 +10,17 @@ interface Props {
 export default async function AdminTasksPage({ searchParams }: Props) {
   const params = await searchParams
   const page = Number(params.page) || 1
-  const status = (params.status as string) || "all"
+  const statusParam = params.status as string | undefined
+  const status =
+    statusParam && statusParam !== "all"
+      ? (statusParam as Database["public"]["Enums"]["task_status"])
+      : "all"
   const search = (params.search as string) || ""
 
   const result = await getAdminTasks({
     page,
     limit: 20,
-    status: status === "all" ? undefined : status,
+    status,
     search: search || undefined,
   })
 

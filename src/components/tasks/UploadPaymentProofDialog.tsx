@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useTransition, useEffect } from "react"
+import Image from "next/image"
 import type { PaymentMilestone } from "@/lib/data/milestone-actions"
 import { submitPaymentProof } from "@/lib/data/milestone-actions"
 import { getPublicBankInfo } from "@/lib/data/admin-settings-actions"
@@ -30,7 +31,7 @@ export function UploadPaymentProofDialog({ milestone, open, onClose }: Props) {
   const [paymentReference, setPaymentReference] = useState("")
   const [proofFile, setProofFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  const [bankInfo, setBankInfo] = useState<any>(null)
+  const [bankInfo, setBankInfo] = useState<Awaited<ReturnType<typeof getPublicBankInfo>> | null>(null)
   const [loadingBankInfo, setLoadingBankInfo] = useState(false)
 
   // Load bank info when dialog opens
@@ -232,9 +233,11 @@ export function UploadPaymentProofDialog({ milestone, open, onClose }: Props) {
             <div className="space-y-2">
               <Label>Vista Previa</Label>
               <div className="rounded-lg border overflow-hidden">
-                <img
+                <Image
                   src={previewUrl}
                   alt="Vista previa del comprobante"
+                  width={800}
+                  height={600}
                   className="w-full h-auto max-h-96 object-contain"
                 />
               </div>

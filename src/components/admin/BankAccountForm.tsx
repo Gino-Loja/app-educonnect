@@ -90,7 +90,7 @@ export function BankAccountForm({ initialData }: BankAccountFormProps) {
 
         {/* Account Number */}
         <div className="space-y-2">
-          <Label htmlFor="account_number">Número de Cuenta</Label>
+          <Label htmlFor="account_number">Numero de Cuenta</Label>
           <Input
             id="account_number"
             value={formData.account_number}
@@ -120,12 +120,12 @@ export function BankAccountForm({ initialData }: BankAccountFormProps) {
 
         {/* Fiscal ID */}
         <div className="space-y-2">
-          <Label htmlFor="fiscal_id">Cédula / RUC / Id. Fiscal</Label>
+          <Label htmlFor="fiscal_id">Cedula / RUC / Id. Fiscal</Label>
           <Input
             id="fiscal_id"
             value={formData.fiscal_id}
             onChange={(e) => handleChange("fiscal_id", e.target.value)}
-            placeholder="Número de identificación"
+            placeholder="Numero de identificacion"
             disabled={isPending}
           />
         </div>
@@ -145,7 +145,7 @@ export function BankAccountForm({ initialData }: BankAccountFormProps) {
 
         {/* Country */}
         <div className="space-y-2">
-          <Label htmlFor="country">País</Label>
+          <Label htmlFor="country">Pais</Label>
           <Input
             id="country"
             value={formData.country}
@@ -170,7 +170,7 @@ export function BankAccountForm({ initialData }: BankAccountFormProps) {
         {/* SWIFT Code */}
         <div className="space-y-2 md:col-span-2">
           <Label htmlFor="swift_code">
-            Código SWIFT / BIC
+            Codigo SWIFT / BIC
             <span className="text-sm text-muted-foreground ml-2">
               (Para transferencias internacionales)
             </span>

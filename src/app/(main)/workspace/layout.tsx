@@ -2,12 +2,10 @@ import { createClient } from "@/utils/supabase/server"
 import { Toaster } from "@/components/ui/sonner"
 
 export default async function RootLayout({
-    children,
     student,
     teacher,
 
 }: {
-    children: React.ReactNode
     student: React.ReactNode
     teacher: React.ReactNode
 

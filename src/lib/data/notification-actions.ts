@@ -1,6 +1,7 @@
 "use server"
 
 import { createClient } from "@/utils/supabase/server"
+import type { Json } from "@/model/schema"
 import { revalidatePath } from "next/cache"
 
 export type Notification = {
@@ -11,7 +12,7 @@ export type Notification = {
   message: string
   link: string | null
   is_read: boolean
-  metadata: Record<string, any> | null
+  metadata: Record<string, unknown> | null
   created_at: string
   read_at: string | null
 }
@@ -82,7 +83,15 @@ export async function getNotifications(options?: {
       return { notifications: [], total: 0 }
     }
 
-    return { notifications: data || [], total: count || 0 }
+    return {
+      notifications: (data || []).map((n) => ({
+        ...n,
+        is_read: n.is_read ?? false,
+        created_at: n.created_at || new Date().toISOString(),
+        metadata: (n.metadata as Record<string, unknown>) || null,
+      })),
+      total: count || 0,
+    }
   } catch (error) {
     console.error("Unexpected error fetching notifications:", error)
     return { notifications: [], total: 0 }
@@ -187,6 +196,42 @@ export async function deleteNotification(notificationId: string): Promise<{
     return { status: "success", message: "Notificación eliminada" }
   } catch (error) {
     console.error("Unexpected error deleting notification:", error)
+    return { status: "error", message: "Error inesperado" }
+  }
+}
+
+/**
+ * Create a new notification (System use only)
+ */
+export async function createNotification(params: {
+  userId: string
+  type: string
+  title: string
+  message: string
+  link?: string
+  metadata?: Record<string, unknown>
+}): Promise<{ status: "success" | "error"; message: string }> {
+  try {
+    const supabase = await createClient()
+
+    // Use the SECURITY DEFINER helper to satisfy RLS when notifying other users
+    const { error } = await supabase.rpc("create_notification", {
+      p_user_id: params.userId,
+      p_type: params.type,
+      p_title: params.title,
+      p_message: params.message,
+      p_link: params.link ?? undefined,
+      p_metadata: (params.metadata as unknown as Json) ?? undefined,
+    })
+
+    if (error) {
+      console.error("Error creating notification:", error)
+      return { status: "error", message: "Error al crear notificación" }
+    }
+
+    return { status: "success", message: "Notificación creada" }
+  } catch (error) {
+    console.error("Unexpected error creating notification:", error)
     return { status: "error", message: "Error inesperado" }
   }
 }

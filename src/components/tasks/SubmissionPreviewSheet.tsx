@@ -6,7 +6,6 @@ import {
   Sheet,
   SheetContent,
   SheetDescription,
-  SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Button } from "@/components/ui/button"
@@ -47,6 +46,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { formatDistanceToNow } from "date-fns"
 import { es } from "date-fns/locale"
 import Image from "next/image"
+import { getTaskAttachments, type TaskAttachment } from "@/lib/data/attachment-actions"
 
 interface Submission {
   id: string
@@ -65,7 +65,9 @@ interface SubmissionPreviewSheetProps {
   submission: Submission
   taskTitle: string
   milestoneTitle?: string
-  studentName: string
+  taskId?: string
+  milestoneId?: string
+  studentName?: string
   open: boolean
   onOpenChange: (open: boolean) => void
   onSubmissionUpdated?: (nextStatus?: Submission["review_status"], submissionId?: string) => void
@@ -75,11 +77,27 @@ export function SubmissionPreviewSheet({
   submission,
   taskTitle,
   milestoneTitle,
+  taskId,
+  milestoneId,
   studentName,
   open,
   onOpenChange,
   onSubmissionUpdated,
 }: SubmissionPreviewSheetProps) {
+  const contactInfoPatterns = useMemo(
+    () => [
+      /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i, // emails
+      /\b(?:\+?\d[\d\s\-().]{7,}\d)\b/, // phone numbers with country code / separators
+      /\b(?:whatsapp|wsp|telegram|tel[eé]fono|celular|phone)\s*:?\s*\+?\d[\d\s\-().]{5,}\d\b/i, // explicit contact mentions
+    ],
+    [],
+  )
+
+  const containsContactInfo = useCallback(
+    (text: string) => contactInfoPatterns.some((regex) => regex.test(text)),
+    [contactInfoPatterns],
+  )
+
   const router = useRouter()
   const statusLabel: Record<NonNullable<Submission["review_status"]>, { label: string; className: string }> = {
     pending_review: { label: "Pendiente por revisar", className: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200" },
@@ -96,6 +114,17 @@ export function SubmissionPreviewSheet({
   const [commentsLoading, setCommentsLoading] = useState(false)
   const [commentText, setCommentText] = useState("")
   const [isCommentSubmitting, setIsCommentSubmitting] = useState(false)
+  const [attachments, setAttachments] = useState<TaskAttachment[]>([])
+  const [attachmentsLoading, setAttachmentsLoading] = useState(false)
+
+  const isCommentSharingContactInfo = useMemo(
+    () => containsContactInfo(commentText),
+    [commentText, containsContactInfo],
+  )
+  const isRejectionSharingContactInfo = useMemo(
+    () => containsContactInfo(rejectionReason),
+    [containsContactInfo, rejectionReason],
+  )
 
   const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").replace(/\/+$/, "")
 
@@ -149,22 +178,30 @@ export function SubmissionPreviewSheet({
       }),
     [submission.submitted_at],
   )
-  const attachmentsCount = images.length
-  const teacherInitials = submission.teacher?.name
-    ?.split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase() || "PR"
+  const submitterName = submission.teacher?.name || studentName || "Profesor"
   const hasImages = images.length > 0
   const isApproved = submission.review_status === "approved" || submission.is_approved === true
-  const isChangesRequested =
-    submission.review_status === "changes_requested" || submission.is_approved === false
 
   useEffect(() => {
     if (!open) return
     loadComments()
   }, [loadComments, open])
+
+  useEffect(() => {
+    const fetchAttachments = async () => {
+      if (!open || !taskId || !milestoneId) {
+        setAttachments([])
+        return
+      }
+      setAttachmentsLoading(true)
+      const result = await getTaskAttachments(taskId, milestoneId)
+      if (!result.error) {
+        setAttachments(result.attachments)
+      }
+      setAttachmentsLoading(false)
+    }
+    fetchAttachments()
+  }, [taskId, milestoneId, open])
 
   const handleApprove = async () => {
     setIsSubmitting(true)
@@ -190,6 +227,11 @@ export function SubmissionPreviewSheet({
   const handleReject = async () => {
     if (!rejectionReason.trim() || rejectionReason.length < 10) {
       toast.error("Debes proporcionar una razón detallada (mín. 10 caracteres)")
+      return
+    }
+
+    if (containsContactInfo(rejectionReason)) {
+      toast.error("Por seguridad, no compartas correos, telefonos u otros datos de contacto.")
       return
     }
 
@@ -221,11 +263,17 @@ export function SubmissionPreviewSheet({
       return
     }
 
+    if (containsContactInfo(trimmed)) {
+      toast.error("Por seguridad, no compartas correos, telefonos u otros datos de contacto.")
+      return
+    }
+
     setIsCommentSubmitting(true)
     try {
       const result = await createSubmissionComment(submission.id, trimmed)
       if (result.status === "success" && result.comment) {
-        setComments((prev) => [...prev, result.comment])
+        const newComment = result.comment
+        setComments((prev) => [...prev, newComment])
         setCommentText("")
         toast.success(result.message)
       } else {
@@ -263,127 +311,75 @@ export function SubmissionPreviewSheet({
   return (
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="right" className="w-full sm:max-w-3xl overflow-y-auto px-0 sm:px-6">
-          <div className="px-6">
-            <SheetHeader className="space-y-2">
-              <SheetTitle className="text-3xl font-bold tracking-tight text-slate-900 dark:text-white">
-                Revisión del trabajo
+        <SheetContent side="right" className="w-full sm:max-w-4xl overflow-y-auto p-0 border-l shadow-2xl">
+          {/* Header */}
+          <div className="sticky top-0 z-20 bg-white/80 backdrop-blur-xl border-b border-slate-200/60 px-6 py-4 dark:bg-slate-950/80 dark:border-slate-800/60">
+            <div className="flex items-center justify-between mb-1">
+              <SheetTitle className="text-xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
+                Revisión de Entrega
+                {milestoneTitle && (
+                  <Badge variant="outline" className="ml-2 font-normal text-xs rounded-full px-2.5 py-0.5 border-slate-300 text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                    {milestoneTitle}
+                  </Badge>
+                )}
               </SheetTitle>
-            <SheetDescription className="text-base">
-              Analiza los avances enviados para <span className="font-semibold text-foreground">{taskTitle}</span> y decide si apruebas o solicitas cambios.
-            </SheetDescription>
-            {milestoneTitle && (
-              <Badge variant="outline" className="w-fit rounded-full border-dashed px-3 py-1 text-xs">
-                {milestoneTitle}
+              <Badge
+                className={`rounded-full px-3 py-1 text-xs font-medium border-0 ${statusLabel[submission.review_status || "pending_review"].className}`}
+              >
+                {statusLabel[submission.review_status || "pending_review"].label}
               </Badge>
-            )}
-            </SheetHeader>
-
-            <div className="mt-6 rounded-3xl border border-slate-200/70 bg-white/80 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/70">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-12 w-12 border border-blue-100 bg-blue-50 text-blue-700 dark:border-blue-500/30 dark:bg-blue-900/40">
-                    <AvatarImage src={submission.teacher?.profile_picture_url || undefined} alt={submission.teacher?.name || "Profesor"} />
-                    <AvatarFallback className="font-semibold">{teacherInitials}</AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="text-sm uppercase tracking-[0.2em] text-blue-500 dark:text-blue-300">Profesor</p>
-                    <p className="text-lg font-semibold text-foreground">{submission.teacher?.name || "Profesor asignado"}</p>
-                    <p className="text-xs text-muted-foreground">Subido {submittedAtLabel}</p>
-                  </div>
-                </div>
-              <div className="flex flex-wrap gap-2 text-sm">
-                <Badge variant="secondary" className="rounded-full px-3">
-                  <span className="font-semibold">{attachmentsCount}</span> evidencia{attachmentsCount === 1 ? "" : "s"}
-                </Badge>
-                <Badge variant="outline" className="rounded-full px-3">
-                  Vista para: {studentName}
-                </Badge>
-                <Badge
-                  className={`rounded-full px-3 ${statusLabel[submission.review_status || "pending_review"].className}`}
-                >
-                  {statusLabel[submission.review_status || "pending_review"].label}
-                </Badge>
-              </div>
             </div>
-            <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
-              <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-800/60">
-                <p className="text-xs uppercase tracking-wide text-muted-foreground">Estado</p>
-                <p className="text-base font-semibold text-foreground">
-                  {statusLabel[submission.review_status || "pending_review"].label}
-                </p>
-              </div>
-                <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-800/60">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Tiempo de respuesta</p>
-                  <p className="text-base font-semibold text-foreground">Aprueba o pide cambios</p>
-                </div>
-                <div className="rounded-2xl border border-slate-100 bg-slate-50/60 p-3 dark:border-slate-800 dark:bg-slate-800/60">
-                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Tarea</p>
-                  <p className="text-base font-semibold text-foreground line-clamp-1">{taskTitle}</p>
-                </div>
-              </div>
-            </div>
+            <SheetDescription className="text-sm text-slate-500 dark:text-slate-400 line-clamp-1">
+              {taskTitle} • Enviado {submittedAtLabel} por <span className="font-medium text-slate-700 dark:text-slate-300">{submitterName}</span>
+            </SheetDescription>
           </div>
 
-          <div className="space-y-6 mt-6 px-6 pb-8">
+          <div className="px-6 py-6 space-y-8">
             {/* Images Gallery */}
-            {hasImages ? (
-              <div className="space-y-4 rounded-3xl border border-slate-200 bg-slate-50/50 p-4 shadow-inner dark:border-slate-800 dark:bg-slate-900/50">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Evidencias visuales</Label>
-                    <p className="text-xs text-muted-foreground">Revisa cada captura para validar la calidad del avance.</p>
-                  </div>
-                  <Badge variant="outline" className="rounded-full border-dashed">
-                    {currentImageIndex + 1} de {images.length}
-                  </Badge>
-                </div>
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Evidencias ({images.length})
+                </Label>
+              </div>
 
-                {/* Main Image */}
-                <div className="relative aspect-video rounded-2xl overflow-hidden border bg-slate-900 text-white shadow-lg dark:border-slate-700">
-                  <div
-                    onContextMenu={handleContextMenu}
-                    className="select-none relative w-full h-full"
-                  >
-                    {imageLoadErrors[currentImageIndex] ? (
-                      <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-white">
-                        <IconPhotoCancel className="h-10 w-10" />
-                        <div>
-                          <p className="text-sm font-semibold">No pudimos cargar esta evidencia</p>
-                          <p className="text-xs text-white/70">
-                            Verifica que el archivo exista en el bucket <span className="font-semibold">task-progress</span> o pide al profesor que lo reenvíe.
+              {hasImages ? (
+                <div className="group relative bg-slate-100 dark:bg-slate-900 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm">
+                  <div className="relative aspect-video bg-slate-950 flex items-center justify-center">
+                    <div
+                      onContextMenu={handleContextMenu}
+                      className="relative w-full h-full"
+                    >
+                      {imageLoadErrors[currentImageIndex] ? (
+                        <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-white p-6">
+                          <IconPhotoCancel className="h-12 w-12 opacity-50" />
+                          <div>
+                            <p className="text-sm font-medium">Imagen no disponible</p>
+                            <p className="text-xs text-white/50 mt-1 max-w-xs mx-auto">
+                              El archivo no se pudo cargar. Puede haber sido eliminado o movido.
+                            </p>
+                          </div>
+                        </div>
+                      ) : (
+                        <Image
+                          src={images[currentImageIndex]}
+                          alt={`Evidencia ${currentImageIndex + 1}`}
+                          fill
+                          className="object-contain"
+                          unoptimized
+                          draggable={false}
+                          onError={() => handleImageError(currentImageIndex)}
+                        />
+                      )}
+
+                      {/* Watermark */}
+                      <div className="absolute inset-0 pointer-events-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-500">
+                        <div className="bg-black/40 backdrop-blur-sm px-4 py-2 rounded-lg">
+                          <p className="text-white/90 text-sm font-medium tracking-widest">
+                            VISTA PREVIA
                           </p>
                         </div>
                       </div>
-                    ) : (
-                      <Image
-                        src={images[currentImageIndex]}
-                        alt={`Imagen ${currentImageIndex + 1}`}
-                        fill
-                        className="object-contain pointer-events-none"
-                        unoptimized
-                        draggable={false}
-                        onError={() => handleImageError(currentImageIndex)}
-                      />
-                    )}
-
-                    {/* Watermark */}
-                    <div className="absolute inset-0 pointer-events-none">
-                      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-black/20 to-black/40" />
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <div className="bg-black/30 backdrop-blur px-6 py-3 rounded-xl transform -rotate-6">
-                          <p className="text-white/80 text-xl font-semibold tracking-wider select-none">
-                            PREVIEW · {studentName}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* No Download Warning */}
-                    <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
-                      <IconDownload className="h-3 w-3" />
-                      <span>Solo vista previa</span>
-                    </div>
                     </div>
 
                     {/* Navigation Arrows */}
@@ -392,7 +388,7 @@ export function SubmissionPreviewSheet({
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="absolute left-3 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-white/80 text-slate-800 hover:bg-white"
+                          className="absolute left-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-black/20 text-white hover:bg-black/40 hover:text-white backdrop-blur-sm border border-white/10 opacity-0 group-hover:opacity-100 transition-all"
                           onClick={prevImage}
                         >
                           <IconChevronLeft className="h-4 w-4" />
@@ -400,217 +396,217 @@ export function SubmissionPreviewSheet({
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="absolute right-3 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-white/80 text-slate-800 hover:bg-white"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-black/20 text-white hover:bg-black/40 hover:text-white backdrop-blur-sm border border-white/10 opacity-0 group-hover:opacity-100 transition-all"
                           onClick={nextImage}
                         >
                           <IconChevronRight className="h-4 w-4" />
-                      </Button>
-                    </>
-                  )}
+                        </Button>
+                      </>
+                    )}
 
-                  {/* Image Counter */}
-                  <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-black/60 text-white text-xs px-3 py-1 rounded-full">
-                    {currentImageIndex + 1} / {images.length}
+                    {/* Counter */}
+                    <div className="absolute bottom-3 right-3 bg-black/60 backdrop-blur-md text-white text-[10px] font-medium px-2.5 py-1 rounded-full border border-white/10">
+                      {currentImageIndex + 1} / {images.length}
+                    </div>
                   </div>
-                </div>
 
-                {/* Thumbnails */}
-                {images.length > 1 && (
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-                    {images.map((img, index) => (
-                      <button
-                        key={index}
-                        onClick={() => setCurrentImageIndex(index)}
-                        className={`relative aspect-video rounded-md overflow-hidden border-2 transition-all ${
-                          currentImageIndex === index
-                            ? "border-blue-600 ring-2 ring-blue-600/20"
-                            : "border-transparent hover:border-muted-foreground/50"
-                        }`}
-                      >
-                        {imageLoadErrors[index] ? (
-                          <div className="flex h-full w-full items-center justify-center bg-muted text-xs font-medium text-muted-foreground">
-                            Error
-                          </div>
-                        ) : (
+                  {/* Thumbnails Strip */}
+                  {images.length > 1 && (
+                    <div className="flex gap-2 p-2 overflow-x-auto bg-white dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 scrollbar-hide">
+                      {images.map((img, index) => (
+                        <button
+                          key={index}
+                          onClick={() => setCurrentImageIndex(index)}
+                          className={`relative h-12 w-20 flex-shrink-0 rounded-md overflow-hidden transition-all ${currentImageIndex === index
+                            ? "ring-2 ring-blue-500 opacity-100"
+                            : "opacity-60 hover:opacity-100"
+                            }`}
+                        >
                           <Image
                             src={img}
-                            alt={`Thumbnail ${index + 1}`}
+                            alt={`Thumb ${index + 1}`}
                             fill
                             className="object-cover"
                             unoptimized
-                            onError={() => handleImageError(index)}
                           />
-                        )}
-                      </button>
-                    ))}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-12 rounded-2xl border-2 border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50">
+                  <div className="h-12 w-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-3">
+                    <IconPhoto className="h-6 w-6 text-slate-400" />
                   </div>
-                )}
-              </div>
-            ) : (
-              <div className="rounded-xl border border-dashed border-muted-foreground/40 bg-muted/30 p-6 text-center">
-                <IconPhoto className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
-                <p className="text-sm font-medium text-foreground">No se adjuntaron evidencias visuales</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Solicita al profesor que suba capturas o documentos de avance para poder revisarlos desde esta pantalla.
-                </p>
-              </div>
-            )}
-
-            {/* Description */}
-            <div className="space-y-2">
-              <Label className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                Detalles de la entrega
-              </Label>
-              <div className="rounded-3xl border border-slate-200 bg-white/90 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
-                <p className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">{submission.content}</p>
-              </div>
+                  <p className="text-sm font-medium text-slate-900 dark:text-slate-200">Sin evidencias visuales</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">El profesor no adjuntó imágenes.</p>
+                </div>
+              )}
             </div>
 
-            {/* Feedback Thread */}
-            <div className="space-y-4 rounded-3xl border border-slate-200 bg-white/90 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <Label className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                    Retroalimentación para el docente
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Deja comentarios sin rechazar la entrega; el profesor recibirá tus notas para ajustar el avance.
+            {/* Content & Comments Stack */}
+            <div className="space-y-8">
+              {/* Description */}
+              <div className="space-y-3">
+                <Label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Descripción del Avance
+                </Label>
+                <div className="rounded-2xl bg-slate-50 p-5 border border-slate-100 dark:bg-slate-900/50 dark:border-slate-800">
+                  <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
+                    {submission.content}
                   </p>
                 </div>
-                <Badge variant="outline" className="rounded-full px-3">
-                  {comments.length} comentario{comments.length === 1 ? "" : "s"}
-                </Badge>
               </div>
 
-              <div className="max-h-64 space-y-3 overflow-y-auto overflow-x-hidden rounded-2xl border border-dashed border-muted/40 bg-muted/20 p-3">
-                {commentsLoading ? (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Spinner className="h-4 w-4" />
-                    Cargando comentarios...
-                  </div>
-                ) : comments.length === 0 ? (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <IconMessage className="h-4 w-4" />
-                    Aún no hay comentarios en esta entrega.
-                  </div>
-                ) : (
-                  comments.map((comment) => {
-                    const authorName =
-                      comment.author?.name ||
-                      (comment.author_role === "teacher"
-                        ? submission.teacher?.name || "Profesor"
-                        : studentName)
-                    const commentInitials =
-                      authorName
-                        ?.split(" ")
-                        .map((n) => n[0])
-                        .join("")
-                        .slice(0, 2)
-                        .toUpperCase() || "US"
-
-                    return (
-                      <div
-                        key={comment.id}
-                        className="flex gap-3 rounded-xl bg-white/80 p-3 shadow-sm dark:bg-slate-900/40"
-                      >
-                        <Avatar className="h-9 w-9 border border-slate-100 dark:border-slate-800">
-                          <AvatarImage
-                            src={comment.author?.profile_picture_url || undefined}
-                            alt={authorName}
-                          />
-                          <AvatarFallback className="text-xs font-semibold">
-                            {commentInitials}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div className="flex-1 space-y-1 min-w-0">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex items-center gap-2">
-                              <p className="text-sm font-semibold text-foreground">{authorName}</p>
-                              <Badge variant="secondary" className="rounded-full px-2 py-0.5 text-[11px]">
-                                {comment.author_role === "teacher" ? "Docente" : "Estudiante"}
-                              </Badge>
-                            </div>
-                            <p className="text-[11px] text-muted-foreground">
-                              {formatDistanceToNow(new Date(comment.created_at), {
-                                addSuffix: true,
-                                locale: es,
-                              })}
+              {/* Attached files (any format) */}
+              <div className="space-y-3">
+                <Label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  Archivos adjuntos del avance
+                </Label>
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950">
+                  {attachmentsLoading ? (
+                    <div className="p-4 text-xs text-slate-500 dark:text-slate-400">Cargando adjuntos...</div>
+                  ) : attachments.length === 0 ? (
+                    <div className="p-4 text-xs text-slate-500 dark:text-slate-400">No hay archivos adjuntos para este avance.</div>
+                  ) : (
+                    <ul className="divide-y divide-slate-200 dark:divide-slate-800">
+                      {attachments.map((file) => (
+                        <li key={file.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{file.file_name}</p>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                              {file.file_type || "Archivo"} • {(file.file_size ? (file.file_size / (1024 * 1024)).toFixed(2) : "N/A")} MB
                             </p>
                           </div>
-                          <p className="text-sm leading-relaxed text-foreground whitespace-pre-wrap break-words">
-                            {comment.message}
-                          </p>
-                        </div>
-                      </div>
-                    )
-                  })
-                )}
+                          <Button asChild variant="outline" size="sm">
+                            <a href={file.file_url} target="_blank" rel="noopener noreferrer" download>
+                              <IconDownload className="h-4 w-4 mr-1" />
+                              Descargar
+                            </a>
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="submission-comment" className="text-xs uppercase tracking-wide text-muted-foreground">
-                  Nuevo comentario
-                </Label>
-                <Textarea
-                  id="submission-comment"
-                  placeholder="Comparte observaciones o ajustes recomendados para que el profesor lo revise..."
-                  value={commentText}
-                  onChange={(e) => setCommentText(e.target.value)}
-                  rows={3}
-                />
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <p className="text-xs text-muted-foreground">
-                    Se enviará al docente asignado y quedará visible en esta entrega.
-                  </p>
-                  <Button
-                    className="sm:w-auto"
-                    onClick={handleAddComment}
-                    disabled={isCommentSubmitting || commentText.trim().length < 5}
-                  >
-                    {isCommentSubmitting ? (
-                      <>
-                        <Spinner className="mr-2" />
-                        Enviando...
-                      </>
+              {/* Comments */}
+              <div className="space-y-3 flex flex-col">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Comentarios
+                  </Label>
+                  <Badge variant="secondary" className="text-[10px] h-5 px-2 bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                    {comments.length}
+                  </Badge>
+                </div>
+
+                <div className="flex flex-col rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden bg-white dark:bg-slate-950 shadow-sm">
+                  {/* Comments List */}
+                  <div className="p-4 overflow-y-auto max-h-[400px] space-y-4 bg-slate-50/30 dark:bg-slate-900/30">
+                    {commentsLoading ? (
+                      <div className="flex flex-col items-center justify-center h-full py-8 text-slate-400 gap-2">
+                        <Spinner className="h-5 w-5" />
+                        <span className="text-xs">Cargando charla...</span>
+                      </div>
+                    ) : comments.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center h-full py-8 text-slate-400 gap-2">
+                        <IconMessage className="h-8 w-8 opacity-20" />
+                        <p className="text-xs text-center max-w-[180px]">
+                          Inicia la conversación con el profesor sobre este avance.
+                        </p>
+                      </div>
                     ) : (
-                      <>
-                        <IconSend className="mr-2 h-4 w-4" />
-                        Enviar comentario
-                      </>
+                      comments.map((comment) => {
+                        const isMe = comment.author_role !== "teacher"; // Assuming student view
+                        return (
+                          <div key={comment.id} className={`flex gap-3 ${isMe ? "flex-row-reverse" : ""}`}>
+                            <Avatar className="h-8 w-8 border border-white shadow-sm flex-shrink-0">
+                              <AvatarImage src={comment.author?.profile_picture_url || undefined} />
+                              <AvatarFallback className="text-[10px] bg-slate-100 text-slate-600">
+                                {comment.author?.name?.substring(0, 2).toUpperCase() || "??"}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className={`flex flex-col max-w-[85%] ${isMe ? "items-end" : "items-start"}`}>
+                              <div className={`rounded-2xl px-4 py-2.5 text-sm shadow-sm ${isMe
+                                ? "bg-blue-600 text-white rounded-tr-sm"
+                                : "bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-tl-sm"
+                                }`}>
+                                <p className="leading-snug break-all whitespace-pre-wrap">{comment.message}</p>
+                              </div>
+                              <span className="text-[10px] text-slate-400 mt-1 px-1">
+                                {formatDistanceToNow(new Date(comment.created_at), { locale: es })}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
                     )}
-                  </Button>
+                  </div>
+
+                  {/* Input Area */}
+                  <div className="p-3 bg-white dark:bg-slate-950 border-t border-slate-100 dark:border-slate-800">
+                    <div className="flex items-end gap-2">
+                      <div className="flex-1 space-y-1">
+                        <Textarea
+                          placeholder="Escribe un comentario..."
+                          value={commentText}
+                          onChange={(e) => setCommentText(e.target.value)}
+                          className="min-h-[44px] max-h-32 py-3 px-4 resize-none rounded-xl border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 focus-visible:ring-blue-500/20 focus-visible:border-blue-500 pr-12 text-sm"
+                          rows={1}
+                        />
+                        {isCommentSharingContactInfo && (
+                          <p className="text-xs text-amber-600 dark:text-amber-400">
+                            Evita compartir correos, teléfonos o datos de contacto. Usa el chat interno.
+                          </p>
+                        )}
+                      </div>
+                      <Button
+                        size="icon"
+                        className="absolute right-1 bottom-1 h-9 w-9 rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={handleAddComment}
+                        disabled={isCommentSubmitting || commentText.trim().length < 2 || isCommentSharingContactInfo}
+                      >
+                        {isCommentSubmitting ? <Spinner className="h-4 w-4 text-white" /> : <IconSend className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
+          </div>
 
-            {/* Actions */}
-            <div className="flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white/70 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/50 sm:flex-row">
-              {!isApproved && (
+          {/* Footer Actions */}
+          <div className="sticky bottom-0 p-4 bg-white/80 backdrop-blur-xl border-t border-slate-200/60 dark:bg-slate-950/80 dark:border-slate-800/60">
+            <div className="flex gap-3 max-w-md mx-auto w-full">
+              {true && (
                 <Button
-                  variant="destructive"
+                  variant="outline"
                   onClick={() => setShowRejectDialog(true)}
-                  className="flex-1"
+                  className="flex-1 h-11 rounded-xl border-slate-200 hover:bg-slate-50 hover:text-rose-600 hover:border-rose-200 dark:border-slate-800 dark:hover:bg-slate-900 dark:hover:text-rose-400 transition-colors"
                   disabled={isSubmitting}
                 >
                   <IconX className="mr-2 h-4 w-4" />
-                  Solicitar reenvío
+                  Solicitar Cambios
                 </Button>
               )}
-              {!isApproved && (
+
+              {!isApproved ? (
                 <Button
-                  variant="default"
                   onClick={() => setShowApproveDialog(true)}
-                  className="flex-1"
+                  className="flex-[2] h-11 rounded-xl bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
                   disabled={isSubmitting}
                 >
-                  <IconCheck className="mr-2 h-4 w-4" />
-                  Aprobar trabajo
+                  <IconCheck className="mr-2 h-5 w-5" />
+                  Aprobar Entrega
                 </Button>
-              )}
-              {isApproved && (
-                <Badge className="w-full justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200">
-                  Trabajo aprobado
-                </Badge>
+              ) : (
+                <div className="flex-[2] h-11 flex items-center justify-center gap-2 rounded-xl bg-emerald-50 text-emerald-600 border border-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-900/50 font-medium">
+                  <IconCheck className="h-5 w-5" />
+                  Aprobado
+                </div>
               )}
             </div>
           </div>
@@ -663,15 +659,20 @@ export function SubmissionPreviewSheet({
               className="mt-2"
             />
             <p className="text-xs text-muted-foreground mt-1">
-              Mínimo 10 caracteres
+              Mínimo 10 caracteres. No compartas datos de contacto.
             </p>
+            {isRejectionSharingContactInfo && (
+              <p className="text-xs text-amber-600 mt-1">
+                Por seguridad, retira correos, telefonos u otros datos de contacto.
+              </p>
+            )}
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isSubmitting}>Cancelar</AlertDialogCancel>
             <Button
               variant="destructive"
               onClick={handleReject}
-              disabled={isSubmitting || rejectionReason.length < 10}
+              disabled={isSubmitting || rejectionReason.length < 10 || isRejectionSharingContactInfo}
             >
               {isSubmitting ? (
                 <>
@@ -688,4 +689,3 @@ export function SubmissionPreviewSheet({
     </>
   )
 }
-

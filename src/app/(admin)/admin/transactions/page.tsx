@@ -3,13 +3,16 @@ import {
   getPendingVerifications,
   getPaymentsInCustody,
 } from "@/lib/data/payment-verification-actions"
+import { getPendingCoursePayments, getCoursePaymentsInCustody } from "@/lib/data/course-actions"
 import { TransactionsTable } from "@/components/admin/TransactionsTable"
 import { TransactionsFilters } from "@/components/admin/TransactionsFilters"
 import { PendingVerificationsTable } from "@/components/admin/PendingVerificationsTable"
 import { PaymentsInCustodyTable } from "@/components/admin/PaymentsInCustodyTable"
+import { PendingCoursePaymentsTable } from "@/components/admin/PendingCoursePaymentsTable"
+import { CoursePaymentsCustodyTable } from "@/components/admin/CoursePaymentsCustodyTable"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { IconCreditCard, IconClock, IconShieldCheck } from "@tabler/icons-react"
+import { IconCreditCard, IconClock, IconShieldCheck, IconBook } from "@tabler/icons-react"
 
 // Force dynamic rendering and disable caching for this page
 export const dynamic = "force-dynamic"
@@ -24,7 +27,7 @@ export default async function AdminTransactionsPage({ searchParams }: Props) {
   const page = Number(params.page) || 1
   const status = (params.status as string) || "all"
 
-  const [result, pendingVerifications, paymentsInCustody] = await Promise.all([
+  const [result, pendingVerifications, paymentsInCustody, pendingCoursePayments, courseCustody] = await Promise.all([
     getTransactions({
       page,
       limit: 20,
@@ -32,6 +35,8 @@ export default async function AdminTransactionsPage({ searchParams }: Props) {
     }),
     getPendingVerifications(),
     getPaymentsInCustody(),
+    getPendingCoursePayments(),
+    getCoursePaymentsInCustody(),
   ])
 
   return (
@@ -44,7 +49,22 @@ export default async function AdminTransactionsPage({ searchParams }: Props) {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">
+              Pagos de Cursos
+            </CardTitle>
+            <IconBook className="h-5 w-5 text-indigo-600" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{pendingCoursePayments.length}</div>
+            <p className="text-xs text-muted-foreground">
+              Compras de cursos pendientes
+            </p>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">
@@ -66,7 +86,7 @@ export default async function AdminTransactionsPage({ searchParams }: Props) {
             <IconShieldCheck className="h-5 w-5 text-blue-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{paymentsInCustody.length}</div>
+            <div className="text-2xl font-bold">{paymentsInCustody.length + courseCustody.length}</div>
             <p className="text-xs text-muted-foreground">
               Pagos verificados, pendientes de transferir
             </p>
@@ -88,16 +108,23 @@ export default async function AdminTransactionsPage({ searchParams }: Props) {
       </div>
 
       {/* Tabs for different transaction views */}
-      <Tabs defaultValue="pending" className="space-y-4">
+      <Tabs defaultValue="courses" className="space-y-4">
         <TabsList>
+          <TabsTrigger value="courses">
+            Pagos de Cursos ({pendingCoursePayments.length})
+          </TabsTrigger>
           <TabsTrigger value="pending">
             Verificaciones Pendientes ({pendingVerifications.length})
           </TabsTrigger>
           <TabsTrigger value="custody">
-            En Custodia ({paymentsInCustody.length})
+            En Custodia ({paymentsInCustody.length + courseCustody.length})
           </TabsTrigger>
           <TabsTrigger value="all">Todas las Transacciones</TabsTrigger>
         </TabsList>
+
+        <TabsContent value="courses" className="space-y-4">
+          <PendingCoursePaymentsTable payments={pendingCoursePayments} />
+        </TabsContent>
 
         <TabsContent value="pending" className="space-y-4">
           <PendingVerificationsTable verifications={pendingVerifications} />
@@ -105,6 +132,7 @@ export default async function AdminTransactionsPage({ searchParams }: Props) {
 
         <TabsContent value="custody" className="space-y-4">
           <PaymentsInCustodyTable payments={paymentsInCustody} />
+          <CoursePaymentsCustodyTable payments={courseCustody} />
         </TabsContent>
 
         <TabsContent value="all" className="space-y-4">

@@ -24,16 +24,13 @@ export default async function AdminUsersPage({ searchParams }: Props) {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Gestión de Usuarios</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Gestion de Usuarios</h1>
         <p className="text-muted-foreground">
           Administra todos los usuarios de la plataforma
         </p>
       </div>
 
-      {/* Filters */}
       <UsersFilters defaultRole={role} defaultStatus={status} defaultSearch={search} />
-
-      {/* Users Table */}
       <UsersTable users={result.users} pagination={result} />
     </div>
   )

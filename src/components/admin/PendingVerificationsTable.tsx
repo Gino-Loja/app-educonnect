@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useMemo, useState, useTransition } from "react"
+import Image from "next/image"
 import { useRouter } from "next/navigation"
 import type { PaymentMilestoneWithDetails } from "@/lib/data/payment-verification-actions"
 import {
@@ -29,9 +30,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Separator } from "@/components/ui/separator"
 import { format } from "date-fns"
 import { es } from "date-fns/locale"
-import { IconEye, IconExternalLink } from "@tabler/icons-react"
+import { IconDownload, IconEye, IconExternalLink } from "@tabler/icons-react"
 import { toast } from "sonner"
-import { useTransition } from "react"
 
 interface Props {
   verifications: PaymentMilestoneWithDetails[]
@@ -56,46 +56,34 @@ interface TaskMilestonesDialogProps {
   onVerify: (payment: PaymentMilestoneWithDetails) => void
 }
 
-function TaskVerificationDialog({
-  task,
-  open,
-  onClose,
-  onVerify,
-}: TaskMilestonesDialogProps) {
+function TaskVerificationDialog({ task, open, onClose, onVerify }: TaskMilestonesDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Verificaciones Pendientes - {task.taskTitle}</DialogTitle>
+          <DialogTitle>Verificaciones pendientes - {task.taskTitle}</DialogTitle>
           <DialogDescription>
-            {task.milestonesCount}{" "}
-            {task.milestonesCount === 1 ? "hito pendiente" : "hitos pendientes"}{" "}
-            de verificación • Total: ${task.totalAmount.toFixed(2)}
+            {task.milestonesCount} {task.milestonesCount === 1 ? "hito" : "hitos"} pendientes · Total: $
+            {task.totalAmount.toFixed(2)}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Student and Teacher Info */}
           <div className="grid grid-cols-2 gap-4">
             <div className="rounded-lg border p-4">
-              <h4 className="text-sm font-semibold mb-2">Estudiante</h4>
+              <h4 className="mb-2 text-sm font-semibold">Estudiante</h4>
               <p className="font-medium">{task.studentName}</p>
               <p className="text-sm text-muted-foreground">{task.studentEmail}</p>
             </div>
             <div className="rounded-lg border p-4">
-              <h4 className="text-sm font-semibold mb-2">Profesor</h4>
+              <h4 className="mb-2 text-sm font-semibold">Profesor</h4>
               <p className="font-medium">{task.teacherName || "Sin asignar"}</p>
-              {task.teacherEmail && (
-                <p className="text-sm text-muted-foreground">
-                  {task.teacherEmail}
-                </p>
-              )}
+              {task.teacherEmail && <p className="text-sm text-muted-foreground">{task.teacherEmail}</p>}
             </div>
           </div>
 
           <Separator />
 
-          {/* Milestones Table */}
           <div className="rounded-md border">
             <Table>
               <TableHeader>
@@ -114,19 +102,13 @@ function TaskVerificationDialog({
                     <TableCell>
                       <Badge variant="outline">Hito {payment.milestone_number}</Badge>
                       {payment.description && (
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {payment.description}
-                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">{payment.description}</p>
                       )}
                     </TableCell>
-                    <TableCell className="font-semibold">
-                      ${payment.amount.toFixed(2)}
-                    </TableCell>
+                    <TableCell className="font-semibold">${payment.amount.toFixed(2)}</TableCell>
                     <TableCell className="text-sm">
                       {payment.submitted_at
-                        ? format(new Date(payment.submitted_at), "PPp", {
-                            locale: es,
-                          })
+                        ? format(new Date(payment.submitted_at), "PPp", { locale: es })
                         : "-"}
                     </TableCell>
                     <TableCell>
@@ -136,15 +118,26 @@ function TaskVerificationDialog({
                     </TableCell>
                     <TableCell>
                       {payment.payment_proof_url ? (
-                        <a
-                          href={payment.payment_proof_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
-                        >
-                          <IconExternalLink className="h-4 w-4" />
-                          Ver
-                        </a>
+                        <div className="flex flex-col gap-2">
+                          <a
+                            href={payment.payment_proof_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
+                          >
+                            <IconExternalLink className="h-4 w-4" />
+                            Abrir en nueva pestaña
+                          </a>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => onVerify(payment)}
+                            className="justify-start"
+                          >
+                            <IconEye className="mr-2 h-4 w-4" />
+                            Ver comprobante
+                          </Button>
+                        </div>
                       ) : (
                         "-"
                       )}
@@ -175,12 +168,10 @@ export function PendingVerificationsTable({ verifications }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [selectedTask, setSelectedTask] = useState<GroupedTask | null>(null)
-  const [selectedPayment, setSelectedPayment] =
-    useState<PaymentMilestoneWithDetails | null>(null)
+  const [selectedPayment, setSelectedPayment] = useState<PaymentMilestoneWithDetails | null>(null)
   const [showRejectForm, setShowRejectForm] = useState(false)
   const [rejectionReason, setRejectionReason] = useState("")
 
-  // Group milestones by task
   const groupedTasks = useMemo(() => {
     const taskMap = new Map<string, GroupedTask>()
 
@@ -208,9 +199,7 @@ export function PendingVerificationsTable({ verifications }: Props) {
       group.milestonesCount++
     })
 
-    return Array.from(taskMap.values()).sort((a, b) =>
-      a.taskTitle.localeCompare(b.taskTitle)
-    )
+    return Array.from(taskMap.values()).sort((a, b) => a.taskTitle.localeCompare(b.taskTitle))
   }, [verifications])
 
   const handleApprove = () => {
@@ -232,7 +221,7 @@ export function PendingVerificationsTable({ verifications }: Props) {
 
   const handleReject = () => {
     if (!selectedPayment || !rejectionReason.trim()) {
-      toast.error("Debes proporcionar una razón para el rechazo")
+      toast.error("Debes proporcionar una razon para el rechazo")
       return
     }
 
@@ -255,9 +244,7 @@ export function PendingVerificationsTable({ verifications }: Props) {
   if (groupedTasks.length === 0) {
     return (
       <div className="rounded-lg border border-dashed p-8 text-center">
-        <p className="text-muted-foreground">
-          No hay comprobantes pendientes de verificación
-        </p>
+        <p className="text-muted-foreground">No hay comprobantes pendientes de verificacion</p>
       </div>
     )
   }
@@ -283,40 +270,27 @@ export function PendingVerificationsTable({ verifications }: Props) {
                 <TableCell>
                   <div>
                     <div className="font-medium">{task.studentName}</div>
-                    <div className="text-sm text-muted-foreground">
-                      {task.studentEmail}
-                    </div>
+                    <div className="text-sm text-muted-foreground">{task.studentEmail}</div>
                   </div>
                 </TableCell>
                 <TableCell>
                   <div>
-                    <div className="font-medium">
-                      {task.teacherName || "Sin asignar"}
-                    </div>
+                    <div className="font-medium">{task.teacherName || "Sin asignar"}</div>
                     {task.teacherEmail && (
-                      <div className="text-sm text-muted-foreground">
-                        {task.teacherEmail}
-                      </div>
+                      <div className="text-sm text-muted-foreground">{task.teacherEmail}</div>
                     )}
                   </div>
                 </TableCell>
                 <TableCell>
                   <Badge variant="secondary">
-                    {task.milestonesCount}{" "}
-                    {task.milestonesCount === 1 ? "hito" : "hitos"}
+                    {task.milestonesCount} {task.milestonesCount === 1 ? "hito" : "hitos"}
                   </Badge>
                 </TableCell>
-                <TableCell className="font-semibold">
-                  ${task.totalAmount.toFixed(2)}
-                </TableCell>
+                <TableCell className="font-semibold">${task.totalAmount.toFixed(2)}</TableCell>
                 <TableCell className="text-right">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setSelectedTask(task)}
-                  >
-                    <IconEye className="h-4 w-4 mr-2" />
-                    Verificar Hitos
+                  <Button size="sm" variant="outline" onClick={() => setSelectedTask(task)}>
+                    <IconEye className="mr-2 h-4 w-4" />
+                    Verificar hitos
                   </Button>
                 </TableCell>
               </TableRow>
@@ -345,58 +319,69 @@ export function PendingVerificationsTable({ verifications }: Props) {
         >
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Verificación de Comprobante</DialogTitle>
+              <DialogTitle>Verificacion de comprobante</DialogTitle>
               <DialogDescription>
-                Hito {selectedPayment.milestone_number} - $
-                {selectedPayment.amount.toFixed(2)}
+                Hito {selectedPayment.milestone_number} - ${selectedPayment.amount.toFixed(2)}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-4">
-              {/* Payment Proof Image */}
               {selectedPayment.payment_proof_url && (
                 <div>
-                  <Label>Comprobante de Pago</Label>
-                  <div className="mt-2">
-                    <a
-                      href={selectedPayment.payment_proof_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 text-sm text-blue-600 hover:underline mb-2"
-                    >
-                      <IconExternalLink className="h-4 w-4" />
-                      Abrir en nueva pestaña
-                    </a>
-                    <div className="rounded-lg border overflow-hidden">
-                      <img
-                        src={selectedPayment.payment_proof_url}
-                        alt="Comprobante"
-                        className="w-full h-auto"
-                      />
+                  <Label>Comprobante de pago</Label>
+                  <div className="mt-2 space-y-2">
+                    <div className="flex flex-wrap gap-2">
+                      <a
+                        href={selectedPayment.payment_proof_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 text-sm text-blue-600 hover:underline"
+                      >
+                        <IconExternalLink className="h-4 w-4" />
+                        Abrir en nueva pestaña
+                      </a>
+                      <a
+                        href={selectedPayment.payment_proof_url}
+                        download
+                        className="inline-flex items-center gap-2 text-sm text-blue-600 hover:underline"
+                      >
+                        <IconDownload className="h-4 w-4" />
+                        Descargar comprobante
+                      </a>
+                    </div>
+                    <div className="relative overflow-hidden rounded-lg border bg-muted/40">
+                      <div className="relative h-96 w-full">
+                        <Image
+                          src={selectedPayment.payment_proof_url}
+                          alt="Comprobante"
+                          fill
+                          sizes="(min-width: 768px) 700px, 100vw"
+                          className="object-contain bg-white"
+                          unoptimized
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
               )}
 
-              {/* Reference */}
               <div>
-                <Label>Referencia de Pago</Label>
-                <code className="block mt-2 rounded bg-muted px-4 py-2">
+                <Label>Referencia de pago</Label>
+                <code className="mt-2 block rounded bg-muted px-4 py-2">
                   {selectedPayment.payment_reference || "N/A"}
                 </code>
               </div>
 
-              {/* Rejection Form */}
               {showRejectForm && (
                 <>
                   <Separator />
                   <div>
-                    <Label htmlFor="rejection-reason">Razón del Rechazo</Label>
+                    <Label htmlFor="rejection-reason">Razon del rechazo</Label>
                     <Textarea
                       id="rejection-reason"
                       value={rejectionReason}
                       onChange={(e) => setRejectionReason(e.target.value)}
-                      placeholder="Explica por qué se rechaza el comprobante..."
+                      placeholder="Explica por que se rechaza el comprobante..."
                       rows={4}
                       disabled={isPending}
                       className="mt-2"
@@ -427,7 +412,7 @@ export function PendingVerificationsTable({ verifications }: Props) {
                     Rechazar
                   </Button>
                   <Button onClick={handleApprove} disabled={isPending}>
-                    {isPending ? "Aprobando..." : "Aprobar y Mover a Custodia"}
+                    {isPending ? "Aprobando..." : "Aprobar y mover a custodia"}
                   </Button>
                 </>
               ) : (
@@ -447,7 +432,7 @@ export function PendingVerificationsTable({ verifications }: Props) {
                     onClick={handleReject}
                     disabled={isPending || !rejectionReason.trim()}
                   >
-                    {isPending ? "Rechazando..." : "Confirmar Rechazo"}
+                    {isPending ? "Rechazando..." : "Confirmar rechazo"}
                   </Button>
                 </>
               )}

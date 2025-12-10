@@ -3,7 +3,6 @@
 import { createClient } from "@/utils/supabase/server"
 import { createTaskSchema } from "@/lib/validation/task-schema"
 import { revalidatePath } from "next/cache"
-import { redirect } from "next/navigation"
 import { Database } from "@/model/schema"
 
 export type ActionState = {
@@ -21,6 +20,11 @@ export type Task = Database["public"]["Tables"]["tasks"]["Row"] & {
     name: string | null
     profile_picture_url: string | null
   }
+  progress?: {
+    total: number
+    completed: number
+    percentage: number
+  }
 }
 
 export type TasksResponse = {
@@ -37,6 +41,23 @@ export async function createTask(
 ): Promise<ActionState> {
   try {
     const supabase = await createClient()
+    const referenceFiles = formData
+      .getAll("reference_files")
+      .filter((file): file is File => file instanceof File && file.size > 0)
+
+    const isPdf = (file: File) =>
+      file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")
+
+    const invalidReference = referenceFiles.find(
+      (file) => !isPdf(file) || file.size > 10 * 1024 * 1024
+    )
+
+    if (invalidReference) {
+      return {
+        status: "error",
+        message: "Solo puedes adjuntar archivos PDF de hasta 10MB",
+      }
+    }
 
     // Get current user
     const {
@@ -143,13 +164,75 @@ export async function createTask(
       }
     }
 
+    let referenceUploadMessage = ""
+    if (task && referenceFiles.length > 0) {
+      const uploadedPaths: string[] = []
+      const sanitizeFileName = (name: string) =>
+        (name || "archivo.pdf").replace(/[^a-zA-Z0-9.-]/g, "_")
+
+      for (const [index, file] of referenceFiles.entries()) {
+        const storagePath = `${task.id}/referencias/${Date.now()}_${index}_${sanitizeFileName(file.name)}`
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from("task-attachments")
+          .upload(storagePath, file, {
+            contentType: "application/pdf",
+            upsert: false,
+          })
+
+        if (uploadError || !uploadData) {
+          console.error("Error uploading reference PDF:", uploadError)
+          if (uploadedPaths.length > 0) {
+            await supabase.storage.from("task-attachments").remove(uploadedPaths)
+          }
+          return {
+            status: "error",
+            message: "La tarea se creó, pero hubo un error al subir tus referencias. Inténtalo de nuevo.",
+          }
+        }
+
+        uploadedPaths.push(uploadData.path)
+
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from("task-attachments").getPublicUrl(uploadData.path)
+
+        const { error: attachmentError } = await supabase
+          .from("task_attachments")
+          .insert({
+            task_id: task.id,
+            uploaded_by: user.id,
+            file_name: file.name,
+            file_url: publicUrl,
+            file_size: file.size,
+            file_type: "application/pdf",
+            attachment_type: "task_reference",
+            milestone_id: null,
+            description: "Adjunto de referencia de la tarea",
+          })
+
+        if (attachmentError) {
+          console.error("Error saving reference attachment:", attachmentError)
+          await supabase.storage.from("task-attachments").remove(uploadedPaths)
+          return {
+            status: "error",
+            message: "La tarea se creó, pero no pudimos guardar los PDFs. Inténtalo nuevamente.",
+          }
+        }
+      }
+
+      referenceUploadMessage =
+        referenceFiles.length === 1
+          ? " Se agregó 1 PDF de referencia."
+          : ` Se agregaron ${referenceFiles.length} PDFs de referencia.`
+    }
+
     // Revalidate paths
     revalidatePath("/workspace")
     revalidatePath("/workspace/mis-tareas")
 
     return {
       status: "success",
-      message: "Tarea creada exitosamente!",
+      message: `Tarea creada exitosamente!${referenceUploadMessage}`,
     }
   } catch (error) {
     console.error("Unexpected error in createTask:", error)
@@ -245,11 +328,37 @@ export async function getMyTasks(
       return { error: "Error al obtener las tareas" }
     }
 
+    // Fetch milestone progress for each task
+    const tasksWithProgress = await Promise.all(
+      (data || []).map(async (task) => {
+        // Fetch payment milestones for this task
+        const { data: milestones } = await supabase
+          .from("payment_milestones")
+          .select("id, status")
+          .eq("task_id", task.id)
+
+        const total = milestones?.length || 0
+        const completed = milestones?.filter(
+          (m) => m.status === "paid" || m.status === "in_custody"
+        ).length || 0
+        const percentage = total > 0 ? Math.round((completed / total) * 100) : 0
+
+        return {
+          ...task,
+          progress: {
+            total,
+            completed,
+            percentage,
+          },
+        } as Task
+      })
+    )
+
     const total = count || 0
     const totalPages = Math.ceil(total / pageSize)
 
     return {
-      tasks: (data as Task[]) || [],
+      tasks: tasksWithProgress,
       total,
       page,
       pageSize,
@@ -370,7 +479,25 @@ export async function getTaskById(
       return { error: "Tarea no encontrada" }
     }
 
-    return data as Task
+    const { data: milestones } = await supabase
+      .from("payment_milestones")
+      .select("status")
+      .eq("task_id", taskId)
+
+    const totalMilestones = milestones?.length || 0
+    const completedMilestones =
+      milestones?.filter((m) => m.status === "paid" || m.status === "in_custody").length || 0
+    const progressPercentage =
+      totalMilestones > 0 ? Math.round((completedMilestones / totalMilestones) * 100) : 0
+
+    return {
+      ...(data as Task),
+      progress: {
+        total: totalMilestones,
+        completed: completedMilestones,
+        percentage: progressPercentage,
+      },
+    }
   } catch (error) {
     console.error("Unexpected error in getTaskById:", error)
     return { error: "Error inesperado al obtener la tarea" }
@@ -608,10 +735,11 @@ export async function deleteTask(taskId: string): Promise<ActionState> {
  */
 export async function cancelTask(
   taskId: string,
-  reason?: string
+  _reason?: string
 ): Promise<ActionState> {
   try {
     const supabase = await createClient()
+    void _reason
 
     // Get current user
     const {
@@ -779,6 +907,98 @@ export async function getAssignedTasks(options?: {
       page: 1,
       pageSize: 10,
       totalPages: 0,
+    }
+  }
+}
+
+/**
+ * Complete a task
+ * Only allowed for tasks in 'in_progress' or 'submitted' status
+ * Only the teacher can complete the task
+ */
+export async function completeTask(taskId: string): Promise<ActionState> {
+  try {
+    const supabase = await createClient()
+
+    // Get current user
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
+
+    if (userError || !user) {
+      return {
+        status: "error",
+        message: "Debes iniciar sesión",
+      }
+    }
+
+    // Get task to verify ownership and status
+    const { data: task, error: fetchError } = await supabase
+      .from("tasks")
+      .select("teacher_id, status")
+      .eq("id", taskId)
+      .single()
+
+    if (fetchError || !task) {
+      return {
+        status: "error",
+        message: "Tarea no encontrada",
+      }
+    }
+
+    // Verify ownership (only teacher can complete)
+    if (task.teacher_id !== user.id) {
+      return {
+        status: "error",
+        message: "No tienes permiso para completar esta tarea",
+      }
+    }
+
+    // Verify status
+    if (task.status === "completed") {
+      return {
+        status: "error",
+        message: "Esta tarea ya está completada",
+      }
+    }
+
+    if (task.status === "cancelled") {
+      return {
+        status: "error",
+        message: "No puedes completar una tarea cancelada",
+      }
+    }
+
+    // Update task status to completed
+    const { error: updateError } = await supabase
+      .from("tasks")
+      .update({
+        status: "completed",
+      })
+      .eq("id", taskId)
+
+    if (updateError) {
+      console.error("Error completing task:", updateError)
+      return {
+        status: "error",
+        message: "Error al completar la tarea. Por favor intenta de nuevo.",
+      }
+    }
+
+    // Revalidate paths
+    revalidatePath("/workspace/mis-trabajos")
+    revalidatePath(`/workspace/mis-trabajos/${taskId}`)
+
+    return {
+      status: "success",
+      message: "Tarea completada exitosamente",
+    }
+  } catch (error) {
+    console.error("Unexpected error in completeTask:", error)
+    return {
+      status: "error",
+      message: "Error inesperado. Por favor intenta de nuevo.",
     }
   }
 }

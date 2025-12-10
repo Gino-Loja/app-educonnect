@@ -23,7 +23,7 @@ import { IconDots, IconEye, IconUserOff, IconUserCheck, IconTrash } from "@table
 import { formatDistanceToNow } from "date-fns"
 import { es } from "date-fns/locale"
 import { toast } from "sonner"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Badge } from "@/components/ui/badge"
 
@@ -46,6 +46,14 @@ const roleLabels: Record<string, string> = {
 
 export function UsersTable({ users, pagination }: UsersTableProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
+
+  const buildPageHref = (page: number) => {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("page", page.toString())
+    const query = params.toString()
+    return query ? `/admin/users?${query}` : "/admin/users"
+  }
 
   const handleToggleStatus = async (userId: string) => {
     const result = await toggleUserStatus(userId)
@@ -60,7 +68,7 @@ export function UsersTable({ users, pagination }: UsersTableProps) {
   const handleDelete = async (userId: string, userName: string | null) => {
     if (
       !confirm(
-        `¿Estás seguro de que deseas eliminar a ${userName || "este usuario"}? Esta acción no se puede deshacer.`
+        `Estas seguro de que deseas eliminar a ${userName || "este usuario"}? Esta accion no se puede deshacer.`
       )
     ) {
       return
@@ -84,7 +92,7 @@ export function UsersTable({ users, pagination }: UsersTableProps) {
               <TableHead>Usuario</TableHead>
               <TableHead>Rol</TableHead>
               <TableHead>Estado</TableHead>
-              <TableHead>Fecha de Registro</TableHead>
+              <TableHead>Fecha de registro</TableHead>
               <TableHead className="text-right">Acciones</TableHead>
             </TableRow>
           </TableHeader>
@@ -135,7 +143,7 @@ export function UsersTable({ users, pagination }: UsersTableProps) {
                         <DropdownMenuItem asChild>
                           <Link href={`/admin/users/${user.id}`}>
                             <IconEye className="mr-2 h-4 w-4" />
-                            Ver Detalles
+                            Ver detalles
                           </Link>
                         </DropdownMenuItem>
                         <DropdownMenuItem onClick={() => handleToggleStatus(user.id)}>
@@ -169,18 +177,17 @@ export function UsersTable({ users, pagination }: UsersTableProps) {
         </Table>
       </div>
 
-      {/* Pagination */}
       {pagination.totalPages > 1 && (
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground">
             Mostrando {users.length} de {pagination.total} usuarios
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               size="sm"
               disabled={pagination.page <= 1}
-              onClick={() => router.push(`/admin/users?page=${pagination.page - 1}`)}
+              onClick={() => router.push(buildPageHref(pagination.page - 1))}
             >
               Anterior
             </Button>
@@ -188,10 +195,13 @@ export function UsersTable({ users, pagination }: UsersTableProps) {
               variant="outline"
               size="sm"
               disabled={pagination.page >= pagination.totalPages}
-              onClick={() => router.push(`/admin/users?page=${pagination.page + 1}`)}
+              onClick={() => router.push(buildPageHref(pagination.page + 1))}
             >
               Siguiente
             </Button>
+            <div className="flex items-center rounded-md border px-3 text-sm text-muted-foreground">
+              Pagina {pagination.page} de {pagination.totalPages}
+            </div>
           </div>
         </div>
       )}

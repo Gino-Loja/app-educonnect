@@ -15,9 +15,15 @@ import { format } from "date-fns"
 import { es } from "date-fns/locale"
 import { IconExternalLink, IconUpload } from "@tabler/icons-react"
 
+interface ExtendedPaymentMilestone extends PaymentMilestone {
+  submission?: {
+    review_status?: string
+  } | null
+}
+
 interface Props {
   taskTitle: string
-  milestones: PaymentMilestone[]
+  milestones: ExtendedPaymentMilestone[]
   open: boolean
   onClose: () => void
   onActionClick?: (milestone: PaymentMilestone) => void
@@ -68,6 +74,13 @@ const statusStyles: Record<
     dot: "bg-red-400",
     cardAccent: "border-red-100 bg-red-50/40",
     description: "El comprobante necesita correcciones",
+  },
+  changes_requested: {
+    label: "Reenvío Solicitado",
+    badge: "bg-rose-100 text-rose-700 border-rose-200",
+    dot: "bg-rose-500",
+    cardAccent: "border-rose-100 bg-rose-50/40",
+    description: "El docente solicitó cambios en la entrega",
   },
 }
 
@@ -131,7 +144,11 @@ export function TaskMilestonesDialog({
               .slice()
               .sort((a, b) => a.milestone_number - b.milestone_number)
               .map((milestone, index, sortedList) => {
-                const statusInfo = statusStyles[milestone.status] || statusStyles.pending_payment
+                const reviewStatus = milestone.submission?.review_status
+                const effectiveStatus =
+                  reviewStatus === "changes_requested" ? "changes_requested" : milestone.status
+
+                const statusInfo = statusStyles[effectiveStatus] || statusStyles.pending_payment
                 const blockingMilestone = sortedList
                   .slice(0, index)
                   .find((m) => m.status === "pending_payment" || m.status === "rejected")
@@ -142,161 +159,165 @@ export function TaskMilestonesDialog({
                     <div className="hidden flex-col items-center md:flex">
                       <span className={`z-10 flex size-5 items-center justify-center rounded-full border-2 border-white shadow ${statusInfo.dot}`} />
                       {index !== sortedList.length - 1 && <span className="mt-1 h-full w-px bg-slate-200/70" />}
-                  </div>
-                  <div
-                    className={`flex-1 rounded-2xl border bg-white/80 p-4 shadow-sm transition-colors ${statusInfo.cardAccent}`}
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-                      <div className="space-y-1">
-                        <Badge variant="outline" className="bg-white/70 text-xs font-semibold">
-                          Hito {milestone.milestone_number}
-                        </Badge>
-                        <p className="text-base font-semibold text-slate-900">
-                          {milestone.description || "Entrega parcial"}
-                        </p>
-                        <p className="text-xs text-slate-500">{statusInfo.description}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-2xl font-bold text-slate-900">
-                          ${milestone.amount.toFixed(2)}
-                        </p>
-                        <Badge className={`${statusInfo.badge} mt-2 border`}>
-                          {statusInfo.label}
-                        </Badge>
-                      </div>
                     </div>
+                    <div
+                      className={`flex-1 rounded-2xl border bg-white/80 p-4 shadow-sm transition-colors ${statusInfo.cardAccent}`}
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-4">
+                        <div className="space-y-1">
+                          <Badge variant="outline" className="bg-white/70 text-xs font-semibold">
+                            Hito {milestone.milestone_number}
+                          </Badge>
+                          <p className="text-base font-semibold text-slate-900">
+                            {milestone.description || "Entrega parcial"}
+                          </p>
+                          <p className="text-xs text-slate-500">{statusInfo.description}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-bold text-slate-900">
+                            ${milestone.amount.toFixed(2)}
+                          </p>
+                          <Badge className={`${statusInfo.badge} mt-2 border`}>
+                            {statusInfo.label}
+                          </Badge>
+                        </div>
+                      </div>
 
-                    <div className="mt-4 grid gap-3 text-sm text-slate-600 md:grid-cols-3">
-                      <div>
-                        <p className="text-xs uppercase tracking-wide text-slate-400">Última actualización</p>
-                        <p className="font-medium">
-                          {formatDate(milestone.paid_at) ||
-                            formatDate(milestone.verified_at) ||
-                            formatDate(milestone.submitted_at) || (
-                              <span className="text-slate-400">Sin registros</span>
-                            )}
-                        </p>
-                      </div>
-                      {viewMode === "student" && (
+                      <div className="mt-4 grid gap-3 text-sm text-slate-600 md:grid-cols-3">
                         <div>
-                          <p className="text-xs uppercase tracking-wide text-slate-400">Referencia</p>
-                          {milestone.payment_reference ? (
-                            <code className="inline-flex items-center rounded-full bg-slate-900/5 px-3 py-1 text-xs font-semibold text-slate-800">
-                              {milestone.payment_reference}
-                            </code>
-                          ) : (
-                            <span className="text-slate-400">Pendiente</span>
-                          )}
+                          <p className="text-xs uppercase tracking-wide text-slate-400">Última actualización</p>
+                          <p className="font-medium">
+                            {formatDate(milestone.paid_at) ||
+                              formatDate(milestone.verified_at) ||
+                              formatDate(milestone.submitted_at) || (
+                                <span className="text-slate-400">Sin registros</span>
+                              )}
+                          </p>
                         </div>
-                      )}
-                      <div>
-                        <p className="text-xs uppercase tracking-wide text-slate-400">
-                          {viewMode === "student" ? "Acción" : "Detalle"}
-                        </p>
-                        <div className="mt-1 text-sm">
-                          {viewMode === "student" && (
-                            <>
-                              {milestone.status === "pending_payment" && (
-                                <>
-                                  {canUploadProof ? (
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <Button
-                                          size="icon"
-                                          variant="outline"
-                                          onClick={() => onActionClick?.(milestone)}
-                                          aria-label="Subir comprobante"
-                                          className="rounded-full"
-                                        >
-                                          <IconUpload className="h-4 w-4" />
-                                        </Button>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="top">Subir comprobante</TooltipContent>
-                                    </Tooltip>
-                                  ) : (
-                                    <p className="text-xs text-slate-500">
-                                      Completa el hito {blockingMilestone?.milestone_number} antes de continuar.
-                                    </p>
-                                  )}
-                                </>
-                              )}
-                              {milestone.status === "rejected" && (
-                                <div className="space-y-2 text-left">
-                                  {milestone.rejection_reason && (
-                                    <p className="text-xs text-destructive">{milestone.rejection_reason}</p>
-                                  )}
-                                  {canUploadProof ? (
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <Button
-                                          size="icon"
-                                          variant="outline"
-                                          onClick={() => onActionClick?.(milestone)}
-                                          aria-label="Subir nuevo comprobante"
-                                          className="rounded-full"
-                                        >
-                                          <IconUpload className="h-4 w-4" />
-                                        </Button>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="top">Subir comprobante</TooltipContent>
-                                    </Tooltip>
-                                  ) : (
-                                    <p className="text-xs text-slate-500">
-                                      Completa el hito {blockingMilestone?.milestone_number} antes de continuar.
-                                    </p>
-                                  )}
-                                </div>
-                              )}
-                              {milestone.status === "pending_verification" && (
-                                <span className="text-xs text-slate-500">Esperando verificación</span>
-                              )}
-                              {milestone.status === "in_custody" && (
-                                <span className="text-xs text-slate-500">Fondos en custodia</span>
-                              )}
-                              {milestone.status === "paid" && (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-                                  ✓ Completado
-                                </span>
-                              )}
-                            </>
-                          )}
-                          {viewMode === "teacher" && (
-                            <div className="space-y-1 text-left text-xs">
-                              {milestone.status === "pending_payment" && (
-                                <p className="text-slate-500">Esperando pago del estudiante</p>
-                              )}
-                              {milestone.status === "pending_verification" && (
-                                <p className="text-slate-500">En verificación por admin</p>
-                              )}
-                              {milestone.status === "in_custody" && (
-                                <p className="text-blue-600 font-semibold">Fondos en custodia</p>
-                              )}
-                              {milestone.status === "paid" && (
-                                <p className="text-emerald-600 font-semibold">✓ Pago recibido</p>
-                              )}
-                              {milestone.status === "rejected" && (
-                                <p className="text-destructive">Comprobante rechazado</p>
-                              )}
-                            </div>
-                          )}
-                          {viewMode === "admin" && milestone.payment_proof_url && (
-                            <a
-                              href={milestone.payment_proof_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline"
-                            >
-                              <IconExternalLink className="h-4 w-4" />
-                              Ver comprobante
-                            </a>
-                          )}
+                        {viewMode === "student" && (
+                          <div>
+                            <p className="text-xs uppercase tracking-wide text-slate-400">Referencia</p>
+                            {milestone.payment_reference ? (
+                              <code className="inline-flex items-center rounded-full bg-slate-900/5 px-3 py-1 text-xs font-semibold text-slate-800">
+                                {milestone.payment_reference}
+                              </code>
+                            ) : (
+                              <span className="text-slate-400">Pendiente</span>
+                            )}
+                          </div>
+                        )}
+                        <div>
+                          <p className="text-xs uppercase tracking-wide text-slate-400">
+                            {viewMode === "student" ? "Acción" : "Detalle"}
+                          </p>
+                          <div className="mt-1 text-sm">
+                            {viewMode === "student" && (
+                              <>
+                                {milestone.status === "pending_payment" && (
+                                  <>
+                                    {canUploadProof ? (
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <Button
+                                            size="icon"
+                                            variant="outline"
+                                            onClick={() => onActionClick?.(milestone)}
+                                            aria-label="Subir comprobante"
+                                            className="rounded-full"
+                                          >
+                                            <IconUpload className="h-4 w-4" />
+                                          </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="top">Subir comprobante</TooltipContent>
+                                      </Tooltip>
+                                    ) : (
+                                      <p className="text-xs text-slate-500">
+                                        Completa el hito {blockingMilestone?.milestone_number} antes de continuar.
+                                      </p>
+                                    )}
+                                  </>
+                                )}
+                                {milestone.status === "rejected" && (
+                                  <div className="space-y-2 text-left">
+                                    {milestone.rejection_reason && (
+                                      <p className="text-xs text-destructive">{milestone.rejection_reason}</p>
+                                    )}
+                                    {canUploadProof ? (
+                                      <Tooltip>
+                                        <TooltipTrigger asChild>
+                                          <Button
+                                            size="icon"
+                                            variant="outline"
+                                            onClick={() => onActionClick?.(milestone)}
+                                            aria-label="Subir nuevo comprobante"
+                                            className="rounded-full"
+                                          >
+                                            <IconUpload className="h-4 w-4" />
+                                          </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="top">Subir comprobante</TooltipContent>
+                                      </Tooltip>
+                                    ) : (
+                                      <p className="text-xs text-slate-500">
+                                        Completa el hito {blockingMilestone?.milestone_number} antes de continuar.
+                                      </p>
+                                    )}
+                                  </div>
+                                )}
+                                {milestone.status === "pending_verification" && (
+                                  <span className="text-xs text-slate-500">Esperando verificación</span>
+                                )}
+                                {milestone.status === "in_custody" && (
+                                  <span className="text-xs text-slate-500">Fondos en custodia</span>
+                                )}
+                                {milestone.status === "paid" && (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+                                    ✓ Completado
+                                  </span>
+                                )}
+                              </>
+                            )}
+                            {viewMode === "teacher" && (
+                              <div className="space-y-1 text-left text-xs">
+                                {milestone.status === "pending_payment" && (
+                                  <p className="text-slate-500">Esperando pago del estudiante</p>
+                                )}
+                                {milestone.status === "pending_verification" && (
+                                  <p className="text-slate-500">En verificación por admin</p>
+                                )}
+                                {milestone.status === "in_custody" && (
+                                  <p className="text-blue-600 font-semibold">Fondos en custodia</p>
+                                )}
+                                {milestone.status === "paid" && (
+                                  <p className="text-emerald-600 font-semibold">✓ Pago recibido</p>
+                                )}
+                                {milestone.status === "rejected" && (
+                                  <p className="text-destructive">Comprobante rechazado</p>
+                                )}
+                                {effectiveStatus === "changes_requested" && (
+                                  <p className="text-rose-600 font-medium">⚠ Se requieren cambios</p>
+                                )}
+                              </div>
+                            )}
+                            {viewMode === "admin" && milestone.payment_proof_url && (
+                              <a
+                                href={milestone.payment_proof_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 hover:underline"
+                              >
+                                <IconExternalLink className="h-4 w-4" />
+                                Ver comprobante
+                              </a>
+                            )}
+                          </div>
                         </div>
                       </div>
+
                     </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })}
           </div>
         </div>
 

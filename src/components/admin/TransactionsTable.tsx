@@ -34,6 +34,7 @@ const statusLabels: Record<string, string> = {
   submitted: "Enviado",
   approved: "Aprobado",
   paid: "Pagado",
+  custodia: "En Custodia",
 }
 
 export function TransactionsTable({ transactions, pagination }: TransactionsTableProps) {
@@ -65,9 +66,14 @@ export function TransactionsTable({ transactions, pagination }: TransactionsTabl
               transactions.map((transaction) => (
                 <TableRow key={transaction.id}>
                   <TableCell>
-                    <span className="font-medium line-clamp-1">
-                      {transaction.task?.title || "N/A"}
-                    </span>
+                    <div className="flex flex-col">
+                      <span className="font-medium line-clamp-1">
+                        {transaction.task?.title || "N/A"}
+                      </span>
+                      <span className="text-xs text-muted-foreground capitalize">
+                        {transaction.task?.type === "course" ? "Curso" : "Tarea"}
+                      </span>
+                    </div>
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-col">

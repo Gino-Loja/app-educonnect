@@ -16,27 +16,29 @@ import { Database } from "@/model/schema"
 import { formatDistanceToNow } from "date-fns"
 import { es } from "date-fns/locale/es"
 
-interface ProposalCardStudentProps {
-  proposal: {
+type ProposalSummary = {
+  id: string
+  proposed_amount: number
+  estimated_hours: number | null
+  cover_letter: string
+  status: Database["public"]["Enums"]["proposal_status"]
+  created_at: string
+  task?: {
     id: string
-    proposed_amount: number
-    estimated_hours: number | null
-    cover_letter: string
-    status: Database["public"]["Enums"]["proposal_status"]
-    created_at: string
-    task?: {
-      id: string
-      title: string
-      status?: string
-    }
-    teacher?: {
-      name: string | null
-      profile_picture_url: string | null
-    }
+    title: string
+    status?: string
   }
+  teacher?: {
+    name: string | null
+    profile_picture_url: string | null
+  }
+}
+
+interface ProposalCardStudentProps {
+  proposal: ProposalSummary
   onAccept?: (proposalId: string) => void
   onReject?: (proposalId: string) => void
-  onViewSubmission?: (proposal: any) => void
+  onViewSubmission?: (proposal: ProposalSummary) => void
   loadingSubmission?: boolean
 }
 

@@ -81,7 +81,8 @@ export async function getPendingVerifications() {
   }
 
   // Flatten the data structure
-  return (data || []).map((milestone: any) => ({
+  // Flatten the data structure and generate signed URLs
+  const flattenedData: PaymentMilestoneWithDetails[] = (data || []).map((milestone) => ({
     ...milestone,
     student: milestone.tasks.student,
     teacher: milestone.tasks.teacher,
@@ -91,6 +92,32 @@ export async function getPendingVerifications() {
       teacher_id: milestone.tasks.teacher_id,
     },
   })) as PaymentMilestoneWithDetails[]
+
+  const milestonesWithSignedUrls = await Promise.all(
+    flattenedData.map(async (milestone) => {
+      if (milestone.payment_proof_url) {
+        let path = milestone.payment_proof_url
+        // Backward compatibility: if it's a full URL, extract the path
+        if (path.startsWith("http")) {
+          const parts = path.split("/comprobantes/")
+          if (parts.length > 1) {
+            path = parts[1]
+          }
+        }
+
+        const { data: signedData } = await supabase.storage
+          .from("comprobantes")
+          .createSignedUrl(path, 3600) // 1 hour expiry
+
+        if (signedData?.signedUrl) {
+          return { ...milestone, payment_proof_url: signedData.signedUrl }
+        }
+      }
+      return milestone
+    })
+  )
+
+  return milestonesWithSignedUrls as PaymentMilestoneWithDetails[]
 }
 
 /**
@@ -129,7 +156,8 @@ export async function getPaymentsInCustody() {
   }
 
   // Flatten the data structure
-  return (data || []).map((milestone: any) => ({
+  // Flatten the data structure and generate signed URLs
+  const flattenedData: PaymentMilestoneWithDetails[] = (data || []).map((milestone) => ({
     ...milestone,
     student: milestone.tasks.student,
     teacher: milestone.tasks.teacher,
@@ -139,6 +167,32 @@ export async function getPaymentsInCustody() {
       teacher_id: milestone.tasks.teacher_id,
     },
   })) as PaymentMilestoneWithDetails[]
+
+  const milestonesWithSignedUrls = await Promise.all(
+    flattenedData.map(async (milestone) => {
+      if (milestone.payment_proof_url) {
+        let path = milestone.payment_proof_url
+        // Backward compatibility: if it's a full URL, extract the path
+        if (path.startsWith("http")) {
+          const parts = path.split("/comprobantes/")
+          if (parts.length > 1) {
+            path = parts[1]
+          }
+        }
+
+        const { data: signedData } = await supabase.storage
+          .from("comprobantes")
+          .createSignedUrl(path, 3600) // 1 hour expiry
+
+        if (signedData?.signedUrl) {
+          return { ...milestone, payment_proof_url: signedData.signedUrl }
+        }
+      }
+      return milestone
+    })
+  )
+
+  return milestonesWithSignedUrls as PaymentMilestoneWithDetails[]
 }
 
 /**
@@ -160,7 +214,7 @@ export async function approvePaymentProof(
       })
       .eq("id", milestoneId)
       .eq("status", "pending_verification")
-    
+
     if (error) {
       console.error("Error approving payment proof:", error)
       return {

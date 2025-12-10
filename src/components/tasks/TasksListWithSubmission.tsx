@@ -14,12 +14,25 @@ interface TasksListWithSubmissionProps {
   studentName: string
 }
 
+type SubmissionPreview = {
+  id: string
+  content: string
+  attachments: string[] | null
+  submitted_at: string
+  is_approved?: boolean | null
+  review_status?: "pending_review" | "changes_requested" | "approved"
+  teacher?: {
+    name: string | null
+    profile_picture_url: string | null
+  }
+}
+
 export function TasksListWithSubmission({
   tasks,
   studentName,
 }: TasksListWithSubmissionProps) {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
-  const [submission, setSubmission] = useState<any | null>(null)
+  const [submission, setSubmission] = useState<SubmissionPreview | null>(null)
   const [sheetOpen, setSheetOpen] = useState(false)
   const [loading, setLoading] = useState(false)
 
@@ -34,12 +47,24 @@ export function TasksListWithSubmission({
       }
 
       if (!result.submission) {
-        toast.error("No se encontró la entrega")
+        toast.error("No se encontro la entrega")
         return
       }
 
+      const normalizedAttachments = Array.isArray(result.submission.attachments)
+        ? result.submission.attachments.filter((file): file is string => typeof file === "string")
+        : null
+
       setSelectedTask(task)
-      setSubmission(result.submission)
+      setSubmission({
+        id: result.submission.id,
+        content: result.submission.content || "",
+        attachments: normalizedAttachments,
+        submitted_at: result.submission.submitted_at || new Date().toISOString(),
+        is_approved: result.submission.is_approved,
+        review_status: result.submission.review_status || undefined,
+        teacher: result.submission.teacher ?? undefined,
+      })
       setSheetOpen(true)
     } catch (error) {
       console.error("Error loading submission:", error)

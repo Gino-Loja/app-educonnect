@@ -45,22 +45,23 @@ export function CommissionRateForm({ initialRate }: CommissionRateFormProps) {
     <form onSubmit={handleSubmit} className="space-y-6">
       <div className="space-y-4">
         <div className="flex items-end gap-4">
-          <div className="flex-1">
-            <Label htmlFor="commission-rate">Tasa de Comisión (%)</Label>
-            <div className="mt-2">
-              <Slider
-                id="commission-rate"
-                min={0}
-                max={100}
-                step={0.5}
-                value={[rate]}
-                onValueChange={handleSliderChange}
-                className="w-full"
-                disabled={isPending}
-              />
-            </div>
+          <div className="flex-1 space-y-2">
+            <Label htmlFor="commission-rate">Tasa de Comision (%)</Label>
+            <p className="text-xs text-muted-foreground">
+              Configura la tasa de comision que la plataforma retiene de cada transaccion.
+            </p>
+            <Slider
+              id="commission-rate"
+              min={0}
+              max={100}
+              step={0.5}
+              value={[rate]}
+              onValueChange={handleSliderChange}
+              className="w-full"
+              disabled={isPending}
+            />
           </div>
-          <div className="w-32">
+          <div className="w-24">
             <Input
               type="number"
               min="0"
@@ -74,15 +75,12 @@ export function CommissionRateForm({ initialRate }: CommissionRateFormProps) {
           </div>
         </div>
 
-        <div className="rounded-lg bg-muted p-4">
-          <p className="text-sm text-muted-foreground">
-            La plataforma retendrá el{" "}
-            <span className="font-semibold text-foreground">{rate}%</span> de cada
-            transacción.
+        <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+          <p className="text-sm text-slate-700">
+            La plataforma retendra el <span className="font-semibold text-slate-900">{rate}%</span> de cada transaccion.
           </p>
-          <p className="text-sm text-muted-foreground mt-2">
-            Ejemplo: En una tarea de $100, la plataforma recibirá ${(rate).toFixed(2)} y
-            el profesor recibirá ${(100 - rate).toFixed(2)}.
+          <p className="text-sm text-slate-700 mt-2">
+            Ejemplo: En una tarea de $100, la plataforma recibira ${(rate).toFixed(2)} y el profesor recibira ${(100 - rate).toFixed(2)}.
           </p>
         </div>
       </div>

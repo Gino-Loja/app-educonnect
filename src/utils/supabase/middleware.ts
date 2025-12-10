@@ -15,7 +15,7 @@ export async function updateSession(request: NextRequest) {
                     return request.cookies.getAll()
                 },
                 setAll(cookiesToSet) {
-                    cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
+                    cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
                     supabaseResponse = NextResponse.next({
                         request,
                     })
@@ -35,13 +35,40 @@ export async function updateSession(request: NextRequest) {
     // Get user role if authenticated
     let userRole: string | null = null
     if (user) {
+        // Try to fetch the existing profile
         const { data: profile } = await supabase
             .from('profiles')
-            .select('role')
+            .select('id, role, email')
             .eq('id', user.id)
-            .single()
+            .maybeSingle()
 
-        userRole = profile?.role || null
+        // If the profile is missing, create a minimal one so onboarding can continue
+        if (!profile) {
+            const defaultRole =
+                (user.user_metadata as { role?: string })?.role ?? 'student'
+
+            const { data: createdProfile } = await supabase
+                .from('profiles')
+                .upsert(
+                    {
+                        id: user.id,
+                        email: user.email ?? '',
+                        role: defaultRole,
+                        name: user.user_metadata?.full_name ?? null,
+                        onboarding_completed: false,
+                        profile_visibility: 'private',
+                        profile_completion_percentage: 0,
+                        is_active: true,
+                    },
+                    { onConflict: 'id' }
+                )
+                .select('role')
+                .single()
+
+            userRole = createdProfile?.role || defaultRole
+        } else {
+            userRole = profile.role || null
+        }
     }
 
     // If user is authenticated and trying to access auth pages, redirect based on role
@@ -57,6 +84,11 @@ export async function updateSession(request: NextRequest) {
         // Redirect admins to /admin, others to /workspace
         url.pathname = userRole === 'admin' ? '/admin' : '/workspace'
         return NextResponse.redirect(url)
+    }
+
+    // Block API routes when there is no authenticated user
+    if (!user && request.nextUrl.pathname.startsWith('/api/')) {
+        return NextResponse.json({ error: 'No autenticado' }, { status: 401 })
     }
 
     // If admin tries to access /workspace, redirect to /admin

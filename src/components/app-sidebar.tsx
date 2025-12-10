@@ -4,17 +4,16 @@ import * as React from "react"
 import Link from "next/link"
 import {
   IconBriefcase,
+  IconBook,
   IconChartBar,
   IconCreditCard,
   IconDashboard,
   IconFileText,
-  IconHistory,
   IconInnerShadowTop,
   IconListDetails,
   IconSearch,
   IconSettings,
   IconStar,
-  IconUser,
   IconUsers,
 } from "@tabler/icons-react"
 
@@ -42,6 +41,13 @@ const studentNavMain = [
     //   { label: "Pendientes", url: "/workspace/mis-tareas?status=open" },
     //   { label: "Completadas", url: "/workspace/mis-tareas?status=completed" },
     // ],
+  },
+  {
+    title: "Mis Cursos",
+    url: "/workspace/mis-cursos",
+    icon: IconBook,
+    description: "Cursos comprados y progreso",
+    group: "courses",
   },
   {
     title: "Propuestas",
@@ -102,19 +108,20 @@ const teacherNavMain = [
     group: "tasks",
   },
   {
+    title: "Mis Cursos",
+    url: "/workspace/mis-cursos",
+    icon: IconBook,
+    description: "Crea y gestiona tus cursos",
+    group: "courses",
+  },
+  {
     title: "Pagos",
     url: "/workspace/pagos",
     icon: IconCreditCard,
     description: "Control de cobros y retiros",
     group: "finance",
   },
-  {
-    title: "Historial",
-    url: "/workspace/historial",
-    icon: IconHistory,
-    description: "Registro de entregas previas",
-    group: "community",
-  },
+
   {
     title: "Reseñas",
     url: "/workspace/resenas",
@@ -126,16 +133,10 @@ const teacherNavMain = [
 
 const navSecondary = [
   {
-    title: "Mi perfil",
-    url: "/workspace/account",
-    icon: IconUser,
-    description: "Datos personales y contacto",
-  },
-  {
     title: "Configuración",
     url: "/workspace/configuracion",
     icon: IconSettings,
-    description: "Preferencias de cuenta",
+    description: "Cuenta y perfil",
   },
 ]
 
@@ -194,7 +195,15 @@ export function AppSidebar({ userRole = "student", user, unreadNotifications = 0
         </div>
       </SidebarHeader>
       <SidebarContent className="px-5">
-        <NavMain items={navigationItems} userRole={userRole} />
+        <React.Suspense
+          fallback={
+            <div className="px-3 py-2 text-sm text-slate-500">
+              Cargando navegación...
+            </div>
+          }
+        >
+          <NavMain items={navigationItems} userRole={userRole} />
+        </React.Suspense>
       </SidebarContent>
       <SidebarFooter className="px-4 pb-4">
         <NavUser user={userData} />

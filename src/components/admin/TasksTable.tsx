@@ -13,7 +13,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { formatDistanceToNow } from "date-fns"
 import { es } from "date-fns/locale"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 
 interface TasksTableProps {
@@ -55,6 +55,14 @@ const priorityLabels: Record<string, string> = {
 
 export function TasksTable({ tasks, pagination }: TasksTableProps) {
   const router = useRouter()
+  const searchParams = useSearchParams()
+
+  const buildPageHref = (page: number) => {
+    const params = new URLSearchParams(searchParams.toString())
+    params.set("page", page.toString())
+    const query = params.toString()
+    return query ? `/admin/tasks?${query}` : "/admin/tasks"
+  }
 
   return (
     <div className="space-y-4">
@@ -151,12 +159,12 @@ export function TasksTable({ tasks, pagination }: TasksTableProps) {
           <p className="text-sm text-muted-foreground">
             Mostrando {tasks.length} de {pagination.total} tareas
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               size="sm"
               disabled={pagination.page <= 1}
-              onClick={() => router.push(`/admin/tasks?page=${pagination.page - 1}`)}
+              onClick={() => router.push(buildPageHref(pagination.page - 1))}
             >
               Anterior
             </Button>
@@ -164,10 +172,13 @@ export function TasksTable({ tasks, pagination }: TasksTableProps) {
               variant="outline"
               size="sm"
               disabled={pagination.page >= pagination.totalPages}
-              onClick={() => router.push(`/admin/tasks?page=${pagination.page + 1}`)}
+              onClick={() => router.push(buildPageHref(pagination.page + 1))}
             >
               Siguiente
             </Button>
+            <div className="flex items-center rounded-md border px-3 text-sm text-muted-foreground">
+              Pagina {pagination.page} de {pagination.totalPages}
+            </div>
           </div>
         </div>
       )}

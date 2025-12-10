@@ -10,6 +10,7 @@ import {
   IconEye,
   IconPlus,
   IconFileUpload,
+  IconStar,
 } from "@tabler/icons-react"
 import type { Database } from "@/model/schema"
 import { formatDistanceToNow } from "date-fns"
@@ -39,6 +40,7 @@ interface TaskCardWorkProps {
   }
   onViewDetails?: (taskId: string) => void
   onSubmitWork?: (taskId: string) => void
+  onReview?: (taskId: string) => void
 }
 
 const statusStyles: Record<string, string> = {
@@ -54,7 +56,7 @@ const priorityStyles: Record<Database["public"]["Enums"]["task_priority"], { lab
   urgent: { label: "Urgente", color: "text-red-600" },
 }
 
-export function TaskCardWork({ task, selectedProposal, onViewDetails, onSubmitWork }: TaskCardWorkProps) {
+export function TaskCardWork({ task, selectedProposal, onViewDetails, onSubmitWork, onReview }: TaskCardWorkProps) {
   const studentName = task.student?.name || "Estudiante"
   const studentInitials = studentName
     .split(" ")
@@ -82,6 +84,7 @@ export function TaskCardWork({ task, selectedProposal, onViewDetails, onSubmitWo
         : task.status === "completed"
           ? "Completado"
           : "En curso"
+  const canReview = task.status === "completed"
 
   return (
     <Card
@@ -162,6 +165,22 @@ export function TaskCardWork({ task, selectedProposal, onViewDetails, onSubmitWo
             <span className={`text-sm font-semibold ${priorityInfo.color}`}>{priorityInfo.label}</span>
           </div>
         </div>
+        {canReview && (
+          <div className="flex items-center justify-between rounded-lg border border-amber-100 bg-amber-50 px-2 py-1 text-xs text-amber-700">
+            <span className="flex items-center gap-1 font-semibold">
+              <IconStar className="h-4 w-4" />
+              Califica al estudiante
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-amber-700 hover:bg-amber-100"
+              onClick={() => onReview?.(task.id)}
+            >
+              Calificar
+            </Button>
+          </div>
+        )}
       </CardContent>
 
       <CardFooter className="flex flex-col gap-2 items-center justify-center border-t border-slate-100 sm:flex-row">

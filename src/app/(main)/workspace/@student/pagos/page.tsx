@@ -3,11 +3,9 @@ import { StudentPaymentsTable } from "@/components/tasks/StudentPaymentsTable"
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { IconClock, IconCheck, IconAlertCircle, IconShieldCheck } from "@tabler/icons-react"
 
 export default async function PagosPage() {

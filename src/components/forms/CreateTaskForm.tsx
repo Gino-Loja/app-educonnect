@@ -1,6 +1,6 @@
 "use client"
 
-import { useActionState, useEffect, useState } from "react"
+import { useActionState, useEffect, useRef, useState } from "react"
 import { createTask, type ActionState } from "@/lib/data/task-actions"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -69,14 +69,25 @@ export function CreateTaskForm() {
   const [budgetMin, setBudgetMin] = useState<number | undefined>()
   const [budgetMax, setBudgetMax] = useState<number | undefined>()
   const [installments, setInstallments] = useState<number>(1)
+  const [referenceFiles, setReferenceFiles] = useState<File[]>([])
+  const referenceInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     if (state?.status === "success") {
       toast.success(state.message)
+      setReferenceFiles([])
+      if (referenceInputRef.current) {
+        referenceInputRef.current.value = ""
+      }
     } else if (state?.status === "error" && state.message) {
       toast.error(state.message)
     }
   }, [state])
+
+  const handleReferenceFilesChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || [])
+    setReferenceFiles(files)
+  }
 
   return (
     <Card className="w-full max-w-4xl mx-auto">
@@ -201,6 +212,32 @@ export function CreateTaskForm() {
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="reference_files">
+              Documentos de referencia (PDF) <span className="text-muted-foreground text-xs">(opcional)</span>
+            </Label>
+            <Input
+              id="reference_files"
+              name="reference_files"
+              type="file"
+              accept=".pdf"
+              multiple
+              ref={referenceInputRef}
+              onChange={handleReferenceFilesChange}
+              disabled={pending}
+            />
+            <p className="text-xs text-muted-foreground">Solo archivos PDF. Tamano maximo por archivo: 10MB.</p>
+            {referenceFiles.length > 0 && (
+              <ul className="list-disc space-y-1 pl-4 text-xs text-muted-foreground">
+                {referenceFiles.map((file) => (
+                  <li key={file.name}>
+                    {file.name} ({(file.size / (1024 * 1024)).toFixed(1)} MB)
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {/* Budget */}

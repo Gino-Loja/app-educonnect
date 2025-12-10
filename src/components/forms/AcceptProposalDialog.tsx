@@ -30,7 +30,7 @@ interface AcceptProposalDialogProps {
     }
     task?: {
       title: string
-      installments?: number
+      installments?: number | null
     }
   }
 }
@@ -61,7 +61,7 @@ export function AcceptProposalDialog({
           </div>
           <AlertDialogDescription className="text-base text-slate-600 dark:text-slate-400">
             Estás a punto de aceptar la propuesta de <span className="font-semibold text-slate-900 dark:text-white">{teacherName}</span> para
-            la tarea "<span className="font-semibold">{taskTitle}</span>".
+            la tarea &quot;<span className="font-semibold">{taskTitle}</span>&quot;.
           </AlertDialogDescription>
         </AlertDialogHeader>
 

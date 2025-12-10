@@ -115,7 +115,32 @@ export async function getMilestonesByTaskId(taskId: string) {
       return { milestones: null, error: "Error al obtener hitos de pago" }
     }
 
-    return { milestones: data as any as PaymentMilestone[], error: null }
+    // Generate signed URLs for payment proofs
+    const milestonesWithSignedUrls: PaymentMilestone[] = await Promise.all(
+      (data || []).map(async (milestone) => {
+        if (milestone.payment_proof_url) {
+          let path = milestone.payment_proof_url
+          // Backward compatibility: if it's a full URL, extract the path
+          if (path.startsWith("http")) {
+            const parts = path.split("/comprobantes/")
+            if (parts.length > 1) {
+              path = parts[1]
+            }
+          }
+
+          const { data: signedData } = await supabase.storage
+            .from("comprobantes")
+            .createSignedUrl(path, 3600) // 1 hour expiry
+
+          if (signedData?.signedUrl) {
+            return { ...milestone, payment_proof_url: signedData.signedUrl }
+          }
+        }
+        return milestone
+      })
+    ) as PaymentMilestone[]
+
+    return { milestones: milestonesWithSignedUrls, error: null }
   } catch (error) {
     console.error("Error in getMilestonesByTaskId:", error)
     return { milestones: null, error: "Error inesperado" }
@@ -151,7 +176,7 @@ export async function submitPaymentProof(
       return { status: "error", message: "Hito de pago no encontrado" }
     }
 
-    const task = milestone.tasks as any
+    const task = milestone.tasks as { student_id: string }
     if (task.student_id !== user.id) {
       return { status: "error", message: "No tienes permiso para actualizar este hito" }
     }
@@ -179,18 +204,12 @@ export async function submitPaymentProof(
       console.error("Error uploading file:", uploadError)
       return { status: "error", message: "Error al subir el archivo" }
     }
-
-    // Get public URL
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from("comprobantes").getPublicUrl(fileName)
-
     // Update milestone with payment proof
     const { error } = await supabase
       .from("payment_milestones")
       .update({
         status: "pending_verification",
-        payment_proof_url: publicUrl,
+        payment_proof_url: fileName,
         payment_reference: paymentReference,
         submitted_at: new Date().toISOString(),
       })
@@ -259,7 +278,32 @@ export async function getStudentPaymentMilestones() {
 
     console.log("getStudentPaymentMilestones: Found milestones:", data?.length || 0)
 
-    return { milestones: data as any as PaymentMilestone[], error: null }
+    // Generate signed URLs for payment proofs
+    const milestonesWithSignedUrls: PaymentMilestone[] = await Promise.all(
+      (data || []).map(async (milestone) => {
+        if (milestone.payment_proof_url) {
+          let path = milestone.payment_proof_url
+          // Backward compatibility: if it's a full URL, extract the path
+          if (path.startsWith("http")) {
+            const parts = path.split("/comprobantes/")
+            if (parts.length > 1) {
+              path = parts[1]
+            }
+          }
+
+          const { data: signedData } = await supabase.storage
+            .from("comprobantes")
+            .createSignedUrl(path, 3600) // 1 hour expiry
+
+          if (signedData?.signedUrl) {
+            return { ...milestone, payment_proof_url: signedData.signedUrl }
+          }
+        }
+        return milestone
+      })
+    ) as PaymentMilestone[]
+
+    return { milestones: milestonesWithSignedUrls, error: null }
   } catch (error) {
     console.error("Error in getStudentPaymentMilestones:", error)
     return { milestones: [], error: null }
@@ -321,7 +365,32 @@ export async function getTeacherPaymentMilestones() {
 
     console.log("getTeacherPaymentMilestones: Found milestones:", data?.length || 0)
 
-    return { milestones: data as any as PaymentMilestone[], error: null }
+    // Generate signed URLs for payment proofs
+    const milestonesWithSignedUrls: PaymentMilestone[] = await Promise.all(
+      (data || []).map(async (milestone) => {
+        if (milestone.payment_proof_url) {
+          let path = milestone.payment_proof_url
+          // Backward compatibility: if it's a full URL, extract the path
+          if (path.startsWith("http")) {
+            const parts = path.split("/comprobantes/")
+            if (parts.length > 1) {
+              path = parts[1]
+            }
+          }
+
+          const { data: signedData } = await supabase.storage
+            .from("comprobantes")
+            .createSignedUrl(path, 3600) // 1 hour expiry
+
+          if (signedData?.signedUrl) {
+            return { ...milestone, payment_proof_url: signedData.signedUrl }
+          }
+        }
+        return milestone
+      })
+    ) as PaymentMilestone[]
+
+    return { milestones: milestonesWithSignedUrls, error: null }
   } catch (error) {
     console.error("Error in getTeacherPaymentMilestones:", error)
     return { milestones: [], error: null }

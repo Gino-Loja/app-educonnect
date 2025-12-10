@@ -1,7 +1,41 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@/utils/supabase/server"
 
-const deriveReviewStatus = (submission: any) => {
+type SubmissionRow = {
+  id: string
+  content: string | null
+  attachments: string[] | null
+  submitted_at: string | null
+  is_approved: boolean | null
+  review_status?: string | null
+  student_feedback?: string | null
+  teacher?: {
+    name: string | null
+    profile_picture_url: string | null
+  } | null
+}
+
+type MilestoneWithSubmission = {
+  id: string
+  task_id: string
+  milestone_number: number
+  title: string
+  description: string | null
+  amount: number
+  status: string
+  due_date: string | null
+  submission_id: string | null
+  payment_reference: string | null
+  payment_proof_url: string | null
+  submission: SubmissionRow | SubmissionRow[] | null
+}
+
+type RawSubmissionRow = Omit<SubmissionRow, "attachments"> & { attachments: unknown }
+type MilestoneWithRawSubmission = Omit<MilestoneWithSubmission, "submission"> & {
+  submission: RawSubmissionRow | RawSubmissionRow[] | null
+}
+
+const deriveReviewStatus = (submission: { review_status?: string | null; is_approved?: boolean | null } | null) => {
   if (!submission) return "pending_review"
   if (submission.review_status) return submission.review_status
   if (submission.is_approved === true) return "approved"
@@ -60,6 +94,7 @@ export async function GET(
           submitted_at,
           is_approved,
           review_status,
+          student_feedback,
           teacher:profiles!task_submissions_teacher_id_fkey (
             name,
             profile_picture_url
@@ -74,16 +109,21 @@ export async function GET(
       return NextResponse.json({ error: "Error al obtener los hitos" }, { status: 500 })
     }
 
-    const normalizedMilestones = (milestones ?? []).map((milestone: any) => {
+    const normalizedMilestones = (milestones ?? []).map((milestone: MilestoneWithRawSubmission) => {
       const submission = Array.isArray(milestone.submission)
         ? milestone.submission[0] ?? null
         : milestone.submission ?? null
+
+      const normalizedAttachments = Array.isArray(submission?.attachments)
+        ? submission.attachments.filter((file): file is string => typeof file === "string")
+        : null
 
       return {
         ...milestone,
         submission: submission
           ? {
               ...submission,
+              attachments: normalizedAttachments,
               review_status: deriveReviewStatus(submission),
             }
           : null,

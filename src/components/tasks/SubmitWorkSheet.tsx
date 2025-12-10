@@ -34,6 +34,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { Skeleton } from "@/components/ui/skeleton"
 import Image from "next/image"
 import { cn } from "@/lib/utils"
+import { TaskAttachmentsSection } from "@/components/tasks/TaskAttachmentsSection"
+import { getTaskAttachments, type TaskAttachment } from "@/lib/data/attachment-actions"
 
 const MAX_IMAGES = 5
 const MAX_IMAGE_SIZE_MB = 5
@@ -54,6 +56,10 @@ type MilestoneOption = {
   status: string
   submission_id: string | null
   due_date: string | null
+  submission?: {
+    review_status: string
+    student_feedback: string | null
+  } | null
 }
 
 interface SubmitWorkSheetProps {
@@ -98,6 +104,7 @@ export function SubmitWorkSheet({
   const [isDragging, setIsDragging] = useState(false)
   const [confirmQuality, setConfirmQuality] = useState(false)
   const [confirmInstructions, setConfirmInstructions] = useState(false)
+  const [attachments, setAttachments] = useState<TaskAttachment[]>([])
 
   useEffect(() => {
     return () => {
@@ -123,8 +130,12 @@ export function SubmitWorkSheet({
         if (!isMounted) return
         const fetched: MilestoneOption[] = data.milestones ?? []
         setMilestones(fetched)
-        const firstPending = fetched.find((milestone) => !milestone.submission_id)
-        setSelectedMilestoneId(firstPending?.id ?? "")
+        // Find first pending OR changes_requested
+        const firstActionable = fetched.find(
+          (milestone) =>
+            !milestone.submission_id || milestone.submission?.review_status === "changes_requested"
+        )
+        setSelectedMilestoneId(firstActionable?.id ?? "")
       } catch (error) {
         if (!isMounted) return
         setMilestones([])
@@ -158,13 +169,44 @@ export function SubmitWorkSheet({
       setMilestones([])
       setMilestonesError(null)
       setSelectedMilestoneId("")
+      setAttachments([])
       if (fileInputRef.current) {
         fileInputRef.current.value = ""
       }
     }
   }, [open])
 
-  const pendingMilestones = milestones.filter((milestone) => !milestone.submission_id)
+  // Load attachments when milestone changes
+  useEffect(() => {
+    if (selectedMilestoneId) {
+      const loadAttachments = async () => {
+        const result = await getTaskAttachments(taskId, selectedMilestoneId)
+        if (!result.error) {
+          setAttachments(result.attachments)
+        }
+      }
+      loadAttachments()
+    } else {
+      setAttachments([])
+    }
+  }, [selectedMilestoneId, taskId])
+
+
+  const pendingMilestones = milestones.filter(
+    (milestone) =>
+      !milestone.submission_id || milestone.submission?.review_status === "changes_requested"
+  )
+  const selectedMilestone = milestones.find((m) => m.id === selectedMilestoneId)
+  const lastMilestoneNumber = milestones.reduce(
+    (max, milestone) => Math.max(max, milestone.milestone_number),
+    0
+  )
+  const isFinalMilestone =
+    selectedMilestone && selectedMilestone.milestone_number === lastMilestoneNumber
+  const canUploadFinalPdf =
+    isFinalMilestone &&
+    selectedMilestone &&
+    (selectedMilestone.status === "in_custody" || selectedMilestone.status === "paid")
   const remainingSlots = MAX_IMAGES - images.length
   const totalSizeBytes = images.reduce((acc, file) => acc + file.size, 0)
   const progress = Math.min((images.length / MAX_IMAGES) * 100, 100)
@@ -230,10 +272,7 @@ export function SubmitWorkSheet({
       toast.error("Selecciona el hito que estás entregando")
       return
     }
-    if (!selectedMilestoneId) {
-      toast.error("Selecciona el hito que está s entregando")
-      return
-    }
+
     setIsSubmitting(true)
 
     try {
@@ -289,7 +328,6 @@ export function SubmitWorkSheet({
     confirmInstructions &&
     Boolean(selectedMilestoneId) &&
     !isSubmitting
-
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -305,17 +343,36 @@ export function SubmitWorkSheet({
         </SheetHeader>
 
         <form onSubmit={handleSubmit} className="mt-6 space-y-8 flex-1 overflow-auto pr-1">
+          {selectedMilestone?.submission?.review_status === "changes_requested" &&
+            selectedMilestone.submission.student_feedback && (
+              <div className="rounded-xl border border-orange-200 bg-orange-50 p-4 dark:border-orange-900/50 dark:bg-orange-900/20">
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5 rounded-full bg-orange-100 p-1 text-orange-600 dark:bg-orange-900/40 dark:text-orange-400">
+                    <IconInfoCircle className="h-4 w-4" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-orange-800 dark:text-orange-200">
+                      Cambios solicitados por el estudiante
+                    </p>
+                    <p className="text-sm text-orange-700 dark:text-orange-300">
+                      {selectedMilestone.submission.student_feedback}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
           <Card className="border-dashed bg-muted/30">
             <CardContent className="space-y-5 p-5">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Entregando</p>
                   <p className="text-lg font-semibold leading-tight text-foreground">{taskTitle}</p>
-                </div>
+                </div >
                 <Badge variant="secondary" className="self-start">
                   Docente
                 </Badge>
-              </div>
+              </div >
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span>
@@ -330,8 +387,8 @@ export function SubmitWorkSheet({
                   />
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </CardContent >
+          </Card >
 
           <div className="space-y-3 rounded-2xl border border-muted/40 bg-background/70 p-4 shadow-sm">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -357,8 +414,11 @@ export function SubmitWorkSheet({
                 <SelectContent>
                   {pendingMilestones.map((milestone) => (
                     <SelectItem key={milestone.id} value={milestone.id}>
-                      {`Hito ${milestone.milestone_number}: ${milestone.title}`} · $
-                      {milestone.amount.toFixed(2)}
+                      <span className={milestone.submission?.review_status === "changes_requested" ? "text-rose-600 font-medium" : ""}>
+                        {milestone.submission?.review_status === "changes_requested" ? "⚠ " : ""}
+                        Hito {milestone.milestone_number}: {milestone.title}
+                      </span>
+                      {" "}· ${milestone.amount.toFixed(2)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -458,9 +518,8 @@ export function SubmitWorkSheet({
               <div className="flex flex-col items-center gap-3 sm:flex-row">
                 <Badge variant="outline" className="border-dashed px-3 py-1 text-xs">
                   {remainingSlots > 0
-                    ? `${remainingSlots} espacio${remainingSlots === 1 ? "" : "s"} disponible${
-                        remainingSlots === 1 ? "" : "s"
-                      }`
+                    ? `${remainingSlots} espacio${remainingSlots === 1 ? "" : "s"} disponible${remainingSlots === 1 ? "" : "s"
+                    }`
                     : "Límite alcanzado"}
                 </Badge>
                 <Button
@@ -522,6 +581,56 @@ export function SubmitWorkSheet({
               </div>
             )}
           </div>
+
+          {/* Task Attachments Section */}
+          {selectedMilestoneId && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <p className="text-sm font-semibold">Referencias del estudiante (PDF)</p>
+                <TaskAttachmentsSection
+                  taskId={taskId}
+                  attachments={attachments}
+                  attachmentType="milestone_submission"
+                  milestoneId={selectedMilestoneId}
+                  canUpload={false}
+                  canDelete={false}
+                  onAttachmentsChange={async () => {
+                    const result = await getTaskAttachments(taskId, selectedMilestoneId)
+                    if (!result.error) {
+                      setAttachments(result.attachments)
+                    }
+                  }}
+                />
+              </div>
+
+              {isFinalMilestone && (
+                <div className="space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-sm font-semibold">Entrega final en PDF</p>
+                    {!canUploadFinalPdf && (
+                      <span className="text-xs text-muted-foreground">
+                        Disponible cuando el hito este pagado o en custodia.
+                      </span>
+                    )}
+                  </div>
+                  <TaskAttachmentsSection
+                    taskId={taskId}
+                    attachments={attachments}
+                    attachmentType="final_delivery"
+                    milestoneId={selectedMilestoneId}
+                    canUpload={Boolean(canUploadFinalPdf)}
+                    canDelete={true}
+                    onAttachmentsChange={async () => {
+                      const result = await getTaskAttachments(taskId, selectedMilestoneId)
+                      if (!result.error) {
+                        setAttachments(result.attachments)
+                      }
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="description">
@@ -593,9 +702,9 @@ export function SubmitWorkSheet({
               )}
             </Button>
           </div>
-        </form>
-      </SheetContent>
-    </Sheet>
+        </form >
+      </SheetContent >
+    </Sheet >
   )
 }
 

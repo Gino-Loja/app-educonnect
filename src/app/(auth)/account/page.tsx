@@ -1,17 +1,9 @@
 import { createClient } from "@/utils/supabase/server"
 import ProfileForm from "./_template/ProfileForm"
 
-export default async function RootLayout({
-    children,
-
-}: {
-    children: React.ReactNode
-
-}) {
+export default async function RootLayout() {
 
     const supabase = await createClient()
-
-    const user = supabase.auth.getUser()
     const { data, error } = await supabase.auth.getUser()
 
     if (error) {

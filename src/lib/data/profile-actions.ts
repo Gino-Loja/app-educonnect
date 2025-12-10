@@ -66,12 +66,40 @@ const profileSchema = z.object({
 
 export async function updateProfile(profileId: string, prevState: unknown, formData: FormData) {
   const supabase = await createClient();
+
+  // Leer el perfil actual para saber si hay foto previa
+  const { data: currentProfile } = await supabase
+    .from('profiles')
+    .select('profile_picture_url')
+    .eq('id', profileId)
+    .maybeSingle()
   
   // Manejar la subida de imagen si existe
   let uploadedImageUrl: string | null = null
   const profileImageFile = formData.get('profileImage') as File
   
   if (profileImageFile && profileImageFile.size > 0) {
+    // Si hay una imagen previa, intentar borrarla para no dejar basura en el bucket
+    if (currentProfile?.profile_picture_url) {
+      const currentUrl = currentProfile.profile_picture_url as string
+      const pathFromUrl = (() => {
+        try {
+          const url = new URL(currentUrl)
+          const prefix = '/storage/v1/object/public/profile-pictures/'
+          return url.pathname.startsWith(prefix) ? url.pathname.slice(prefix.length) : null
+        } catch {
+          return null
+        }
+      })()
+
+      if (pathFromUrl) {
+        const { error: removeError } = await supabase.storage.from('profile-pictures').remove([pathFromUrl])
+        if (removeError) {
+          console.warn('No se pudo eliminar la imagen anterior:', removeError)
+        }
+      }
+    }
+
     try {
       uploadedImageUrl = await uploadProfileImage(profileImageFile, profileId)
     } catch (error) {
@@ -125,7 +153,7 @@ export async function updateProfile(profileId: string, prevState: unknown, formD
       bio: parsed.data.bio || null,
     };
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('profiles')
       .update({ ...profileData, onboarding_completed: true, profile_visibility: 'public' })
       .eq('id', profileId)
@@ -142,10 +170,13 @@ export async function updateProfile(profileId: string, prevState: unknown, formD
 
     revalidatePath('/dashboard');
     revalidatePath('/profile');
+    revalidatePath('/workspace/configuracion/cuenta');
+    revalidatePath('/workspace/perfil');
     
     return {
       status: "success",
       message: "Perfil actualizado correctamente",
+      profilePictureUrl: profileData.profile_picture_url,
     }
 
   } catch (error) {

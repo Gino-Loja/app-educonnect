@@ -327,7 +327,7 @@ const EduConnectLanding = () => {
 
                 <div className="space-y-6">
                   <h2 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-gray-900 leading-tight">
-                    Resuelve tus tareas con el mejor talento académico latino.
+                    Resuelve tus tareas con el mejor talento académico.
                   </h2>
                   <p className="text-lg text-gray-600 max-w-2xl">
                     Más de 5,000 docentes verificados te ayudan a dominar materias complejas, mejorar tu promedio o
