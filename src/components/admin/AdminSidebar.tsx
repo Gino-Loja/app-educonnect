@@ -1,27 +1,30 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
+import { useState } from "react"
 import {
-  IconDashboard,
-  IconUsers,
   IconClipboardList,
   IconCreditCard,
-  IconSettings,
+  IconDashboard,
   IconLogout,
+  IconSettings,
+  IconUsers,
 } from "@tabler/icons-react"
+
 import {
   Sidebar,
   SidebarContent,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuItem,
-  SidebarMenuButton,
   SidebarFooter,
   SidebarGroup,
-  SidebarGroupLabel,
   SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { createClient } from "@/utils/supabase/client"
 
 const menuItems = [
   {
@@ -45,7 +48,7 @@ const menuItems = [
     icon: IconCreditCard,
   },
   {
-    title: "Configuración",
+    title: "Configuracion",
     href: "/admin/settings",
     icon: IconSettings,
   },
@@ -53,6 +56,23 @@ const menuItems = [
 
 export function AdminSidebar() {
   const pathname = usePathname()
+  const router = useRouter()
+  const [signingOut, setSigningOut] = useState(false)
+
+  const handleLogout = async () => {
+    if (signingOut) return
+    setSigningOut(true)
+    const supabase = createClient()
+    try {
+      await supabase.auth.signOut()
+      router.push("/login")
+      router.refresh()
+    } catch (error) {
+      console.error("Error al cerrar sesion", error)
+    } finally {
+      setSigningOut(false)
+    }
+  }
 
   return (
     <Sidebar>
@@ -62,7 +82,7 @@ export function AdminSidebar() {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Gestión</SidebarGroupLabel>
+          <SidebarGroupLabel>Gestion</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {menuItems.map((item) => {
@@ -86,11 +106,9 @@ export function AdminSidebar() {
       <SidebarFooter className="border-t p-4">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton asChild>
-              <Link href="/workspace">
-                <IconLogout className="h-4 w-4" />
-                <span>Volver al Workspace</span>
-              </Link>
+            <SidebarMenuButton onClick={handleLogout} disabled={signingOut}>
+              <IconLogout className="h-4 w-4" />
+              <span>{signingOut ? "Cerrando..." : "Cerrar sesion"}</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
