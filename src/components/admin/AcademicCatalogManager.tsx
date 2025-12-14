@@ -99,11 +99,11 @@ function Section({
         <h3 className="text-lg font-semibold">{title}</h3>
       </div>
       <div className="rounded-lg border border-slate-200 p-4">
-        <div className="grid gap-3 md:grid-cols-[1fr_160px_120px] items-end">
+        <div className="grid items-end gap-3 sm:grid-cols-2 xl:grid-cols-[1fr_160px_auto]">
           <div className="space-y-1.5">
             <Label>Nuevo valor</Label>
             <Input
-              placeholder="Ej. Matemáticas"
+              placeholder="Ej. Matematicas"
               value={form.label}
               onChange={(e) => setForm((prev) => ({ ...prev, label: e.target.value }))}
               disabled={isPending}
@@ -118,7 +118,11 @@ function Section({
               disabled={isPending}
             />
           </div>
-          <Button onClick={handleAdd} disabled={isPending || !form.label.trim()}>
+          <Button
+            onClick={handleAdd}
+            disabled={isPending || !form.label.trim()}
+            className="w-full sm:col-span-2 xl:col-span-1 xl:w-auto"
+          >
             {isPending ? "Guardando..." : "Agregar"}
           </Button>
         </div>
@@ -174,9 +178,9 @@ export function AcademicCatalogManager({ subjects, levels }: AcademicCatalogMana
       <div className="space-y-3">
         <div className="flex items-center gap-2">
           <IconX className="h-4 w-4 text-blue-600 rotate-45" />
-          <h3 className="text-base font-semibold">Niveles académicos</h3>
+          <h3 className="text-base font-semibold">Niveles academicos</h3>
         </div>
-        <Section title="Niveles académicos" type="level" items={levels} />
+        <Section title="Niveles academicos" type="level" items={levels} />
       </div>
     </div>
   )

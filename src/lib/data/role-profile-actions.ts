@@ -2,6 +2,15 @@
 
 import { z } from "zod"
 import { revalidatePath } from "next/cache"
+
+import {
+  saveStudentProfile,
+  saveTeacherProfile,
+  updateStudentAcademicSettings as updateStudentAcademicSettingsUseCase,
+  updateTeacherAcademicSettings as updateTeacherAcademicSettingsUseCase,
+  updateTeacherFinancialSettings as updateTeacherFinancialSettingsUseCase,
+} from "@/application/profiles/updateProfile"
+import { makeProfilesRepository } from "@/infrastructure/supabase/profiles-repo"
 import { createClient } from "@/utils/supabase/server"
 
 type ActionResult = { status: "success" | "error"; message: string }
@@ -23,7 +32,7 @@ const teacherSchema = z.object({
   teaching_experience_years: z
     .preprocess((v) => (v === "" ? null : v), z.coerce.number().int().min(0).nullable())
     .optional(),
-  portfolio_url: z.string().url("URL inválida").optional().or(z.literal("")),
+  portfolio_url: z.string().url("URL invalida").optional().or(z.literal("")),
   accepts_urgent_tasks: z.boolean().default(false),
   accepts_long_term: z.boolean().default(false),
   teaching_methodology: z.string().optional(),
@@ -31,6 +40,7 @@ const teacherSchema = z.object({
 
 export async function upsertTeacherProfile(_: unknown, formData: FormData): Promise<ActionResult> {
   const supabase = await createClient()
+  const profilesRepo = makeProfilesRepository(supabase)
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -58,24 +68,25 @@ export async function upsertTeacherProfile(_: unknown, formData: FormData): Prom
   }
 
   const data = parsed.data
+  const result = await saveTeacherProfile(
+    {
+      teacherId: user.id,
+      hourlyRate: data.hourly_rate,
+      specialties: data.specialties,
+      subjects: data.subjects,
+      languages: data.languages,
+      educationLevel: data.education_level || null,
+      teachingExperienceYears: data.teaching_experience_years ?? null,
+      portfolioUrl: data.portfolio_url || null,
+      acceptsUrgentTasks: data.accepts_urgent_tasks,
+      acceptsLongTerm: data.accepts_long_term,
+      teachingMethodology: data.teaching_methodology || null,
+    },
+    { profilesRepo },
+  )
 
-  const { error } = await supabase.from("teachers").upsert({
-    id: user.id,
-    hourly_rate: data.hourly_rate,
-    specialties: data.specialties,
-    subjects: data.subjects,
-    languages: data.languages,
-    education_level: data.education_level || null,
-    teaching_experience_years: data.teaching_experience_years ?? null,
-    portfolio_url: data.portfolio_url || null,
-    accepts_urgent_tasks: data.accepts_urgent_tasks,
-    accepts_long_term: data.accepts_long_term,
-    teaching_methodology: data.teaching_methodology || null,
-  })
-
-  if (error) {
-    console.error("Error upserting teacher profile", error)
-    return { status: "error", message: "No se pudo guardar el perfil docente" }
+  if (result.status === "error") {
+    return { status: "error", message: result.message }
   }
 
   revalidatePath("/workspace/configuracion")
@@ -95,6 +106,7 @@ const studentSchema = z.object({
 
 export async function upsertStudentProfile(_: unknown, formData: FormData): Promise<ActionResult> {
   const supabase = await createClient()
+  const profilesRepo = makeProfilesRepository(supabase)
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -118,20 +130,21 @@ export async function upsertStudentProfile(_: unknown, formData: FormData): Prom
   }
 
   const data = parsed.data
+  const result = await saveStudentProfile(
+    {
+      studentId: user.id,
+      academicLevel: data.academic_level || null,
+      major: data.major || null,
+      subjectsOfInterest: data.subjects_of_interest,
+      preferredLearningStyle: data.preferred_learning_style || null,
+      budgetRange: data.budget_range || null,
+      maxBudgetPerTask: data.max_budget_per_task ?? null,
+    },
+    { profilesRepo },
+  )
 
-  const { error } = await supabase.from("students").upsert({
-    id: user.id,
-    academic_level: data.academic_level || null,
-    major: data.major || null,
-    subjects_of_interest: data.subjects_of_interest,
-    preferred_learning_style: data.preferred_learning_style || null,
-    budget_range: data.budget_range || null,
-    max_budget_per_task: data.max_budget_per_task ?? null,
-  })
-
-  if (error) {
-    console.error("Error upserting student profile", error)
-    return { status: "error", message: "No se pudo guardar el perfil de estudiante" }
+  if (result.status === "error") {
+    return { status: "error", message: result.message }
   }
 
   revalidatePath("/workspace/configuracion")
@@ -141,12 +154,13 @@ export async function upsertStudentProfile(_: unknown, formData: FormData): Prom
 const financialSchema = z.object({
   hourly_rate: z.coerce.number().min(0, "La tarifa debe ser mayor o igual a 0"),
   currency: z.string().trim().min(1, "Ingresa una moneda").max(5),
+  country: z.string().trim().nullish(),
   bank_name: z.string().trim().min(2, "Ingresa el banco"),
-  account_number: z.string().trim().min(4, "Número de cuenta inválido"),
+  account_number: z.string().trim().min(4, "Numero de cuenta invalido"),
   account_holder: z.string().trim().min(2, "Titular requerido"),
-  account_type: z.string().trim().optional(),
-  routing_number: z.string().trim().optional(),
-  account_alias: z.string().trim().optional(),
+  account_type: z.string().trim().nullish(),
+  routing_number: z.string().trim().nullish(),
+  account_alias: z.string().trim().nullish(),
 })
 
 const teacherAcademicSchema = z.object({
@@ -161,6 +175,7 @@ const studentAcademicSchema = z.object({
 
 export async function updateTeacherFinancialSettings(_: unknown, formData: FormData): Promise<ActionResult> {
   const supabase = await createClient()
+  const profilesRepo = makeProfilesRepository(supabase)
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -169,19 +184,15 @@ export async function updateTeacherFinancialSettings(_: unknown, formData: FormD
     return { status: "error", message: "No autenticado" }
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .maybeSingle()
-
-  if (profile?.role !== "teacher") {
+  const role = await profilesRepo.getRole(user.id)
+  if (role !== "teacher") {
     return { status: "error", message: "Solo disponible para docentes" }
   }
 
   const parsed = financialSchema.safeParse({
     hourly_rate: formData.get("hourly_rate"),
     currency: formData.get("currency"),
+    country: formData.get("country"),
     bank_name: formData.get("bank_name"),
     account_number: formData.get("account_number"),
     account_holder: formData.get("account_holder"),
@@ -196,7 +207,6 @@ export async function updateTeacherFinancialSettings(_: unknown, formData: FormD
   }
 
   const data = parsed.data
-
   const paymentInfo = {
     primary_account: {
       bank_name: data.bank_name,
@@ -208,25 +218,50 @@ export async function updateTeacherFinancialSettings(_: unknown, formData: FormD
     },
   }
 
-  const { error } = await supabase.from("teachers").upsert({
-    id: user.id,
-    hourly_rate: data.hourly_rate,
-    currency: data.currency,
-    payment_info: paymentInfo,
-    updated_at: new Date().toISOString(),
-  })
+  const result = await updateTeacherFinancialSettingsUseCase(
+    {
+      teacherId: user.id,
+      hourlyRate: data.hourly_rate,
+      currency: data.currency,
+      paymentInfo,
+    },
+    { profilesRepo },
+  )
 
-  if (error) {
-    console.error("Error updating teacher financial settings", error)
-    return { status: "error", message: "No se pudo guardar los parámetros financieros" }
+  if (result.status === "error") {
+    return { status: "error", message: result.message }
+  }
+
+  const { error: bankError } = await supabase
+    .from("teacher_bank_accounts")
+    .upsert(
+      {
+        teacher_id: user.id,
+        bank_name: data.bank_name,
+        account_holder: data.account_holder,
+        account_number: data.account_number,
+        account_type: data.account_type || null,
+        routing_number: data.routing_number || null,
+        account_alias: data.account_alias || null,
+        country: data.country || null,
+        currency: data.currency,
+      },
+      { onConflict: "teacher_id" },
+    )
+
+  if (bankError) {
+    console.error("Error saving teacher bank account", bankError)
+    return { status: "error", message: "No pudimos guardar los datos bancarios" }
   }
 
   revalidatePath("/workspace/configuracion/finanzas")
-  return { status: "success", message: "Parámetros financieros guardados" }
+  revalidatePath("/workspace/configuracion/cuenta-bancaria")
+  return { status: "success", message: "Parametros financieros guardados" }
 }
 
 export async function updateTeacherAcademicSettings(_: unknown, formData: FormData): Promise<ActionResult> {
   const supabase = await createClient()
+  const profilesRepo = makeProfilesRepository(supabase)
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -235,13 +270,8 @@ export async function updateTeacherAcademicSettings(_: unknown, formData: FormDa
     return { status: "error", message: "No autenticado" }
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .maybeSingle()
-
-  if (profile?.role !== "teacher") {
+  const role = await profilesRepo.getRole(user.id)
+  if (role !== "teacher") {
     return { status: "error", message: "Solo disponible para docentes" }
   }
 
@@ -256,27 +286,26 @@ export async function updateTeacherAcademicSettings(_: unknown, formData: FormDa
   }
 
   const data = parsed.data
-
-  const { error } = await supabase
-    .from("teachers")
-    .update({
+  const result = await updateTeacherAcademicSettingsUseCase(
+    {
+      teacherId: user.id,
       subjects: data.subjects,
-      education_level: data.education_level || null,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", user.id)
+      educationLevel: data.education_level || null,
+    },
+    { profilesRepo },
+  )
 
-  if (error) {
-    console.error("Error updating teacher academic settings", error)
-    return { status: "error", message: "No se pudo guardar la información académica" }
+  if (result.status === "error") {
+    return { status: "error", message: result.message }
   }
 
   revalidatePath("/workspace/configuracion/academico")
-  return { status: "success", message: "Información académica guardada" }
+  return { status: "success", message: "Informacion academica guardada" }
 }
 
 export async function updateStudentAcademicSettings(_: unknown, formData: FormData): Promise<ActionResult> {
   const supabase = await createClient()
+  const profilesRepo = makeProfilesRepository(supabase)
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -285,13 +314,8 @@ export async function updateStudentAcademicSettings(_: unknown, formData: FormDa
     return { status: "error", message: "No autenticado" }
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .maybeSingle()
-
-  if (profile?.role !== "student") {
+  const role = await profilesRepo.getRole(user.id)
+  if (role !== "student") {
     return { status: "error", message: "Solo disponible para estudiantes" }
   }
 
@@ -306,19 +330,19 @@ export async function updateStudentAcademicSettings(_: unknown, formData: FormDa
   }
 
   const data = parsed.data
+  const result = await updateStudentAcademicSettingsUseCase(
+    {
+      studentId: user.id,
+      academicLevel: data.academic_level || null,
+      subjectsOfInterest: data.subjects_of_interest,
+    },
+    { profilesRepo },
+  )
 
-  const { error } = await supabase.from("students").upsert({
-    id: user.id,
-    academic_level: data.academic_level || null,
-    subjects_of_interest: data.subjects_of_interest,
-    updated_at: new Date().toISOString(),
-  })
-
-  if (error) {
-    console.error("Error updating student academic settings", error)
-    return { status: "error", message: "No se pudo guardar la información académica" }
+  if (result.status === "error") {
+    return { status: "error", message: result.message }
   }
 
   revalidatePath("/workspace/configuracion/academico")
-  return { status: "success", message: "Información académica guardada" }
+  return { status: "success", message: "Informacion academica guardada" }
 }

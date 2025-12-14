@@ -40,7 +40,7 @@ export default async function AccountPageTeacher() {
       <div>
         <h3 className="text-lg font-medium">Cuenta</h3>
         <p className="text-sm text-muted-foreground">
-          Actualiza tu información personal.
+          Actualiza tu informacion personal.
         </p>
       </div>
       <Separator />

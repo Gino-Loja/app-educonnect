@@ -2,16 +2,33 @@
 
 import { revalidatePath } from "next/cache"
 
-import { getMinioClient } from "@/utils/minio/client"
 import { createClient } from "@/utils/supabase/server"
+import { getMinioClient } from "@/utils/minio/client"
+import { markLessonCompleted as markLessonCompletedUC } from "@/application/enrollments/markLessonCompleted"
+import { startPurchase as startPurchaseUC } from "@/application/enrollments/startPurchase"
+import { createCourse as createCourseUC } from "@/application/courses/createCourse"
+import { publishCourse as publishCourseUC } from "@/application/courses/publishCourse"
+import { createModule as createModuleUC } from "@/application/courses/createModule"
+import { createLesson as createLessonUC } from "@/application/courses/createLesson"
+import { updateCourseDetails as updateCourseDetailsUC } from "@/application/courses/updateCourseDetails"
+import { updateModuleDetails } from "@/application/courses/updateModule"
+import { updateLessonDetails } from "@/application/courses/updateLesson"
+import { deleteModuleById } from "@/application/courses/deleteModule"
+import { deleteLessonById } from "@/application/courses/deleteLesson"
+import { verifyCoursePayment as verifyCoursePaymentUC } from "@/application/payments/verifyCoursePayment"
+import type { StartPurchaseResult } from "@/domain/enrollments"
+import { makeCoursesRepository } from "@/infrastructure/supabase/courses-repo"
+import {
+  makeEnrollmentsRepository,
+  makeLessonProgressRepository,
+} from "@/infrastructure/supabase/enrollments-repo"
+import { makePaymentsRepository } from "@/infrastructure/supabase/payments-repo"
 import {
   createCourseSchema,
   createLessonSchema,
   createModuleSchema,
   deleteLessonSchema,
   deleteModuleSchema,
-  markLessonSchema,
-  startPurchaseSchema,
   updateCourseSchema,
   updateLessonSchema,
   updateModuleSchema,
@@ -27,9 +44,7 @@ import {
   type UpdateModuleInput,
 } from "@/lib/validation/course-schema"
 
-type ActionState =
-  | { status: "error"; message: string }
-  | { status: "success"; message: string; enrollmentId: string; paymentId: string }
+type ActionState = StartPurchaseResult
 
 export type PurchaseFormState =
   | { status: "idle"; message?: string }
@@ -144,22 +159,6 @@ async function uploadProofToMinio(file: File, userId: string): Promise<string | 
   return objectName
 }
 
-async function getSignedProofUrl(path: string | null): Promise<string | null> {
-  if (!path) return null
-  if (path.startsWith("http")) return path
-
-  const minio = getMinioClient()
-  const objectName = path.startsWith(`${COURSE_PROOF_BUCKET}/`)
-    ? path.replace(`${COURSE_PROOF_BUCKET}/`, "")
-    : path
-
-  try {
-    return await minio.presignedGetObject(COURSE_PROOF_BUCKET, objectName, 60 * 60) // 1h
-  } catch {
-    return null
-  }
-}
-
 async function uploadLessonAsset(file: File, userId: string): Promise<string> {
   if (!file || file.size === 0) {
     throw new Error("Archivo invalido")
@@ -267,101 +266,21 @@ export async function startPurchase(payload: StartPurchaseInput): Promise<Action
     return { status: "error", message: "No autenticado" }
   }
 
-  const parsed = startPurchaseSchema.safeParse(payload)
-  if (!parsed.success) {
-    const msg = parsed.error.issues[0]?.message || "Datos invalidos"
-    return { status: "error", message: msg }
-  }
-  const { courseId, method, proofUrl, notes } = parsed.data
+  const enrollmentsRepo = makeEnrollmentsRepository(supabase)
+  const result = await startPurchaseUC(
+    {
+      ...payload,
+      studentId: userResult.user.id,
+    },
+    { enrollmentsRepo },
+  )
 
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", userResult.user.id)
-    .single()
-
-  if (profileError || !profile) {
-    return { status: "error", message: "No pudimos validar tu perfil" }
+  if (result.status === "success") {
+    revalidatePath("/workspace/mis-cursos")
+    revalidatePath(`/workspace/cursos/${payload.courseId}`)
   }
 
-  const isAdmin = profile.role === "admin"
-  if (!isAdmin && profile.role !== "student") {
-    return { status: "error", message: "Solo estudiantes pueden comprar cursos" }
-  }
-
-  const { data: course, error: courseError } = await supabase
-    .from("courses")
-    .select("id, status, teacher_id, price")
-    .eq("id", courseId)
-    .single()
-
-  if (courseError || !course) {
-    return { status: "error", message: "Curso no encontrado" }
-  }
-
-  if (course.status === "draft") {
-    return { status: "error", message: "El curso no esta disponible para compra" }
-  }
-
-  const { data: existingEnrollment, error: existingError } = await supabase
-    .from("enrollments")
-    .select("id, status")
-    .eq("course_id", courseId)
-    .eq("student_id", userResult.user.id)
-    .in("status", ["pending", "active"])
-    .maybeSingle()
-
-  if (existingError && (existingError as { code?: string }).code !== "PGRST116") {
-    return { status: "error", message: "No pudimos verificar tu inscripcion" }
-  }
-
-  if (existingEnrollment) {
-    return { status: "error", message: "Ya tienes una inscripcion en curso para este curso" }
-  }
-
-  const { data: enrollment, error: enrollmentError } = await supabase
-    .from("enrollments")
-    .insert({
-      course_id: courseId,
-      student_id: userResult.user.id,
-      status: "pending",
-      paid_amount: 0,
-      proof_url: proofUrl,
-      notes,
-    })
-    .select("id")
-    .single()
-
-  if (enrollmentError || !enrollment) {
-    console.error("Error creating enrollment", enrollmentError)
-    return { status: "error", message: "No pudimos registrar tu compra" }
-  }
-
-  const { data: payment, error: paymentError } = await supabase
-    .from("payments")
-    .insert({
-      enrollment_id: enrollment.id,
-      method,
-      status: "pending",
-      proof_url: proofUrl,
-    })
-    .select("id")
-    .single()
-
-  if (paymentError || !payment) {
-    console.error("Error creating payment", paymentError)
-    return { status: "error", message: "No pudimos registrar tu pago" }
-  }
-
-  revalidatePath("/workspace/mis-cursos")
-  revalidatePath(`/workspace/cursos/${courseId}`)
-
-  return {
-    status: "success",
-    message: "Compra registrada. Un administrador verificara tu pago.",
-    enrollmentId: enrollment.id,
-    paymentId: payment.id,
-  }
+  return result
 }
 
 export async function createCourse(payload: CreateCourseInput): Promise<PurchaseFormState> {
@@ -385,22 +304,20 @@ export async function createCourse(payload: CreateCourseInput): Promise<Purchase
     return { status: "error", message: "Solo docentes o admin pueden crear cursos" }
   }
 
-  const { data, error } = await supabase
-    .from("courses")
-    .insert({
-      teacher_id: userResult.user.id,
+  const repo = makeCoursesRepository(supabase)
+  const result = await createCourseUC(
+    {
+      teacherId: userResult.user.id,
       title: parsed.data.title,
-      description: parsed.data.description,
+      description: parsed.data.description ?? null,
       price: parsed.data.price,
-      status: "draft",
-      cover_url: parsed.data.coverUrl,
-    })
-    .select("id")
-    .single()
+      coverUrl: parsed.data.coverUrl,
+    },
+    { coursesRepo: repo },
+  )
 
-  if (error || !data) {
-    console.error("Error creating course", error)
-    return { status: "error", message: "No pudimos crear el curso" }
+  if (result.status === "error") {
+    return { status: "error", message: result.message }
   }
 
   revalidatePath("/workspace/mis-cursos")
@@ -422,23 +339,18 @@ export async function publishCourse(courseId: string): Promise<PurchaseFormState
     return { status: "error", message: "No autorizado" }
   }
 
-  const { data: course, error: courseError } = await supabase
-    .from("courses")
-    .select("id, teacher_id")
-    .eq("id", courseId)
-    .single()
+  const repo = makeCoursesRepository(supabase)
+  const teacherId = await repo.getCourseTeacher(courseId)
+  if (!teacherId) return { status: "error", message: "Curso no encontrado" }
 
-  if (courseError || !course) return { status: "error", message: "Curso no encontrado" }
-  if (course.teacher_id !== userResult.user.id && profile?.role !== "admin") {
+  if (teacherId !== userResult.user.id && profile?.role !== "admin") {
     return { status: "error", message: "No puedes publicar este curso" }
   }
 
-  const { error: updateError } = await supabase
-    .from("courses")
-    .update({ status: "published" })
-    .eq("id", courseId)
-
-  if (updateError) return { status: "error", message: "No pudimos publicar el curso" }
+  const result = await publishCourseUC(courseId, { coursesRepo: repo })
+  if (result.status === "error") {
+    return { status: "error", message: result.message }
+  }
   revalidatePath("/workspace/mis-cursos")
   return { status: "success", message: "Curso publicado" }
 }
@@ -454,28 +366,24 @@ export async function createModule(payload: CreateModuleInput): Promise<Purchase
     return { status: "error", message: msg }
   }
 
-  const { data: course } = await supabase
-    .from("courses")
-    .select("teacher_id")
-    .eq("id", parsed.data.courseId)
-    .single()
-
-  if (!course || (course.teacher_id !== userResult.user.id)) {
+  const repo = makeCoursesRepository(supabase)
+  const teacherId = await repo.getCourseTeacher(parsed.data.courseId)
+  if (!teacherId || teacherId !== userResult.user.id) {
     return { status: "error", message: "No autorizado" }
   }
 
-  const { error } = await supabase
-    .from("course_modules")
-    .insert({
-      course_id: parsed.data.courseId,
+  const result = await createModuleUC(
+    {
+      courseId: parsed.data.courseId,
       title: parsed.data.title,
-      description: parsed.data.description,
-      position: parsed.data.position ?? 1,
-    })
+      description: parsed.data.description ?? null,
+      position: parsed.data.position,
+    },
+    { coursesRepo: repo },
+  )
 
-  if (error) {
-    console.error("Error creating module", error)
-    return { status: "error", message: "No pudimos crear el modulo" }
+  if (result.status === "error") {
+    return { status: "error", message: result.message }
   }
 
   revalidatePath("/workspace/mis-cursos")
@@ -516,41 +424,24 @@ export async function createLesson(
     return { status: "error", message: "No autorizado" }
   }
 
-  const { data: lessonRow, error } = await supabase
-    .from("lessons")
-    .insert({
-      module_id: parsed.data.moduleId,
+  const repo = makeCoursesRepository(supabase)
+  const result = await createLessonUC(
+    {
+      moduleId: parsed.data.moduleId,
       title: parsed.data.title,
-      content_type: parsed.data.contentType || (file ? file.type : null),
-      content_url: contentUrl,
-      text_content: parsed.data.textContent,
-      duration_minutes: parsed.data.durationMinutes,
+      contentType: parsed.data.contentType || (file ? file.type : null),
+      contentUrl,
+      textContent: parsed.data.textContent,
+      durationMinutes: parsed.data.durationMinutes,
       position: parsed.data.position,
-      pass_score: parsed.data.passScore,
-    })
-    .select("id")
-    .single()
+      passScore: parsed.data.passScore,
+      questions: parsed.data.questions,
+    },
+    { coursesRepo: repo },
+  )
 
-  if (error) {
-    console.error("Error creating lesson", error)
-    return { status: "error", message: "No pudimos crear la leccion" }
-  }
-
-  if (lessonRow && (parsed.data.questions || []).length) {
-    const questionsPayload = (parsed.data.questions || [])
-      .filter((q) => (q.prompt || "").trim().length > 0)
-      .map((q, idx) => ({
-        lesson_id: lessonRow.id,
-        question_type: q.type,
-        prompt: q.prompt,
-        options: q.options && q.options.length ? q.options : q.type === "true_false" ? ["Verdadero", "Falso"] : null,
-        correct_answer: q.correctAnswer || (q.type === "true_false" ? "Verdadero" : q.options?.[0] || null),
-        feedback: q.feedback || null,
-        position: q.position ?? idx + 1,
-      }))
-    if (questionsPayload.length) {
-      await supabase.from("lesson_questions").insert(questionsPayload)
-    }
+  if (result.status === "error") {
+    return { status: "error", message: result.message }
   }
 
   revalidatePath("/workspace/mis-cursos")
@@ -569,33 +460,26 @@ export async function updateCourseDetails(payload: UpdateCourseInput): Promise<P
     return { status: "error", message: msg }
   }
 
-  const { data: courseRow, error: courseError } = await supabase
-    .from("courses")
-    .select("teacher_id")
-    .eq("id", parsed.data.id)
-    .single()
-  if (courseError || !courseRow) return { status: "error", message: "Curso no encontrado" }
-
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", userResult.user.id).single()
+  const repo = makeCoursesRepository(supabase)
+  const teacherId = await repo.getCourseTeacher(parsed.data.id)
 
-  if (courseRow.teacher_id !== userResult.user.id && profile?.role !== "admin") {
+  if (!teacherId) return { status: "error", message: "Curso no encontrado" }
+
+  if (teacherId !== userResult.user.id && profile?.role !== "admin") {
     return { status: "error", message: "No autorizado" }
   }
 
-  const { error } = await supabase
-    .from("courses")
-    .update({
-      title: parsed.data.title,
-      description: parsed.data.description,
-      price: parsed.data.price,
-      cover_url: parsed.data.coverUrl,
-      status: parsed.data.status,
-    })
-    .eq("id", parsed.data.id)
-
-  if (error) {
-    console.error("Error updating course", error)
-    return { status: "error", message: "No pudimos actualizar el curso" }
+  const result = await updateCourseDetailsUC(
+    {
+      ...parsed.data,
+      description: parsed.data.description ?? null,
+      status: parsed.data.status ?? "draft",
+    },
+    { coursesRepo: repo },
+  )
+  if (result.status === "error") {
+    return { status: "error", message: result.message }
   }
 
   revalidatePath("/workspace/mis-cursos")
@@ -614,35 +498,22 @@ export async function updateModule(payload: UpdateModuleInput): Promise<Purchase
     return { status: "error", message: msg }
   }
 
-  const { data: moduleRow, error: moduleError } = await supabase
-    .from("course_modules")
-    .select("id, course_id, course:courses!inner(teacher_id)")
-    .eq("id", parsed.data.id)
-    .single()
-
-  if (moduleError || !moduleRow) return { status: "error", message: "Modulo no encontrado" }
-
+  const coursesRepo = makeCoursesRepository(supabase)
+  const moduleData = await coursesRepo.getModuleWithCourse(parsed.data.id)
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", userResult.user.id).single()
 
-  if (moduleRow.course.teacher_id !== userResult.user.id && profile?.role !== "admin") {
+  if (!moduleData) return { status: "error", message: "Modulo no encontrado" }
+  if (moduleData.courseTeacherId !== userResult.user.id && profile?.role !== "admin") {
     return { status: "error", message: "No autorizado" }
   }
 
-  const { error } = await supabase
-    .from("course_modules")
-    .update({
-      title: parsed.data.title,
-      description: parsed.data.description,
-    })
-    .eq("id", parsed.data.id)
-
-  if (error) {
-    console.error("Error updating module", error)
-    return { status: "error", message: "No pudimos actualizar el modulo" }
+  const result = await updateModuleDetails({ ...parsed.data, description: parsed.data.description ?? null }, { coursesRepo })
+  if (result.status === "error") {
+    return { status: "error", message: result.message }
   }
 
   revalidatePath("/workspace/mis-cursos")
-  revalidatePath(`/workspace/mis-cursos/${moduleRow.course_id}`)
+  revalidatePath(`/workspace/mis-cursos/${moduleData.courseId}`)
   return { status: "success", message: "Modulo actualizado" }
 }
 
@@ -654,33 +525,22 @@ export async function deleteModule(payload: DeleteModuleInput): Promise<Purchase
   const parsed = deleteModuleSchema.safeParse(payload)
   if (!parsed.success) return { status: "error", message: "Modulo no valido" }
 
-  const { data: moduleRow, error: moduleError } = await supabase
-    .from("course_modules")
-    .select("id, course_id, course:courses!inner(teacher_id)")
-    .eq("id", parsed.data.id)
-    .single()
-  if (moduleError || !moduleRow) return { status: "error", message: "Modulo no encontrado" }
-
+  const coursesRepo = makeCoursesRepository(supabase)
+  const moduleData = await coursesRepo.getModuleWithCourse(parsed.data.id)
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", userResult.user.id).single()
 
-  if (moduleRow.course.teacher_id !== userResult.user.id && profile?.role !== "admin") {
+  if (!moduleData) return { status: "error", message: "Modulo no encontrado" }
+  if (moduleData.courseTeacherId !== userResult.user.id && profile?.role !== "admin") {
     return { status: "error", message: "No autorizado" }
   }
 
-  const { error: deleteLessonsError } = await supabase.from("lessons").delete().eq("module_id", moduleRow.id)
-  if (deleteLessonsError) {
-    console.error("Error deleting module lessons", deleteLessonsError)
-    return { status: "error", message: "No pudimos eliminar las lecciones del modulo" }
-  }
-
-  const { error } = await supabase.from("course_modules").delete().eq("id", moduleRow.id)
-  if (error) {
-    console.error("Error deleting module", error)
-    return { status: "error", message: "No pudimos eliminar el modulo" }
+  const result = await deleteModuleById(parsed.data.id, { coursesRepo })
+  if (result.status === "error") {
+    return { status: "error", message: result.message }
   }
 
   revalidatePath("/workspace/mis-cursos")
-  revalidatePath(`/workspace/mis-cursos/${moduleRow.course_id}`)
+  revalidatePath(`/workspace/mis-cursos/${moduleData.courseId}`)
   return { status: "success", message: "Modulo eliminado" }
 }
 
@@ -698,78 +558,50 @@ export async function updateLesson(
     return { status: "error", message: msg }
   }
 
-  const { data: lessonRow, error: lessonError } = await supabase
-    .from("lessons")
-    .select("id, module_id, content_url, content_type, duration_minutes, pass_score")
-    .eq("id", parsed.data.id)
-    .single()
-  if (lessonError || !lessonRow) return { status: "error", message: "Leccion no encontrada" }
-
-  const { data: moduleRow, error: moduleError } = await supabase
-    .from("course_modules")
-    .select("id, course_id, course:courses!inner(teacher_id)")
-    .eq("id", lessonRow.module_id)
-    .single()
-  if (moduleError || !moduleRow) return { status: "error", message: "Modulo no encontrado" }
+  const coursesRepo = makeCoursesRepository(supabase)
+  const lesson = await coursesRepo.getLessonWithCourse(parsed.data.id)
+  if (!lesson) return { status: "error", message: "Leccion no encontrada" }
 
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", userResult.user.id).single()
-
-  if (moduleRow.course.teacher_id !== userResult.user.id && profile?.role !== "admin") {
+  if (lesson.courseTeacherId !== userResult.user.id && profile?.role !== "admin") {
     return { status: "error", message: "No autorizado" }
   }
 
-  let contentUrl = parsed.data.contentUrl ?? lessonRow.content_url ?? null
+  let contentUrl = parsed.data.contentUrl ?? lesson.contentUrl ?? null
   if (file && file.size > 0) {
     // Delete the old file from MinIO if it exists
-    if (lessonRow.content_url) {
-      await deleteLessonAsset(lessonRow.content_url)
+    if (lesson.contentUrl) {
+      await deleteLessonAsset(lesson.contentUrl)
     }
 
     // Upload the new file
     contentUrl = await uploadLessonAsset(file, userResult.user.id)
   }
 
-  const contentType = parsed.data.contentType || (file ? file.type : lessonRow.content_type) || null
+  const contentType = parsed.data.contentType || (file ? file.type : lesson.contentType) || null
   const durationMinutes =
-    typeof parsed.data.durationMinutes === "number" ? parsed.data.durationMinutes : lessonRow.duration_minutes
+    typeof parsed.data.durationMinutes === "number" ? parsed.data.durationMinutes : lesson.durationMinutes
 
-  const { error } = await supabase
-    .from("lessons")
-    .update({
+  const result = await updateLessonDetails(
+    {
+      id: parsed.data.id,
       title: parsed.data.title,
-      content_type: contentType,
-      content_url: contentUrl,
-      text_content: parsed.data.textContent,
-      duration_minutes: durationMinutes,
-      pass_score: parsed.data.passScore ?? lessonRow.pass_score,
-    })
-    .eq("id", parsed.data.id)
+      contentType,
+      contentUrl,
+      textContent: parsed.data.textContent ?? lesson.textContent,
+      durationMinutes,
+      passScore: parsed.data.passScore ?? lesson.passScore,
+      questions: parsed.data.questions,
+    },
+    { coursesRepo },
+  )
 
-  if (error) {
-    console.error("Error updating lesson", error)
-    return { status: "error", message: "No pudimos actualizar la leccion" }
-  }
-
-  if (parsed.data.questions !== undefined) {
-    await supabase.from("lesson_questions").delete().eq("lesson_id", lessonRow.id)
-    const questionsPayload = (parsed.data.questions || [])
-      .filter((q) => (q.prompt || "").trim().length > 0)
-      .map((q, idx) => ({
-        lesson_id: lessonRow.id,
-        question_type: q.type,
-        prompt: q.prompt,
-        options: q.options && q.options.length ? q.options : q.type === "true_false" ? ["Verdadero", "Falso"] : null,
-        correct_answer: q.correctAnswer || (q.type === "true_false" ? "Verdadero" : q.options?.[0] || null),
-        feedback: q.feedback || null,
-        position: q.position ?? idx + 1,
-      }))
-    if (questionsPayload.length) {
-      await supabase.from("lesson_questions").insert(questionsPayload)
-    }
+  if (result.status === "error") {
+    return { status: "error", message: result.message }
   }
 
   revalidatePath("/workspace/mis-cursos")
-  revalidatePath(`/workspace/mis-cursos/${moduleRow.course_id}`)
+  revalidatePath(`/workspace/mis-cursos/${lesson.courseId}`)
   return { status: "success", message: "Leccion actualizada" }
 }
 
@@ -781,39 +613,26 @@ export async function deleteLesson(payload: DeleteLessonInput): Promise<Purchase
   const parsed = deleteLessonSchema.safeParse(payload)
   if (!parsed.success) return { status: "error", message: "Leccion no valida" }
 
-  const { data: lessonRow, error: lessonError } = await supabase
-    .from("lessons")
-    .select("id, module_id, content_url")
-    .eq("id", parsed.data.id)
-    .single()
-  if (lessonError || !lessonRow) return { status: "error", message: "Leccion no encontrada" }
-
-  const { data: moduleRow, error: moduleError } = await supabase
-    .from("course_modules")
-    .select("id, course_id, course:courses!inner(teacher_id)")
-    .eq("id", lessonRow.module_id)
-    .single()
-  if (moduleError || !moduleRow) return { status: "error", message: "Modulo no encontrado" }
-
+  const coursesRepo = makeCoursesRepository(supabase)
+  const lesson = await coursesRepo.getLessonWithCourse(parsed.data.id)
   const { data: profile } = await supabase.from("profiles").select("role").eq("id", userResult.user.id).single()
 
-  if (moduleRow.course.teacher_id !== userResult.user.id && profile?.role !== "admin") {
+  if (!lesson) return { status: "error", message: "Leccion no encontrada" }
+
+  if (lesson.courseTeacherId !== userResult.user.id && profile?.role !== "admin") {
     return { status: "error", message: "No autorizado" }
   }
 
   // Delete the file from MinIO if it exists
-  if (lessonRow.content_url) {
-    await deleteLessonAsset(lessonRow.content_url)
+  if (lesson.contentUrl) {
+    await deleteLessonAsset(lesson.contentUrl)
   }
 
-  const { error } = await supabase.from("lessons").delete().eq("id", parsed.data.id)
-  if (error) {
-    console.error("Error deleting lesson", error)
-    return { status: "error", message: "No pudimos eliminar la leccion" }
-  }
+  const result = await deleteLessonById(parsed.data.id, { coursesRepo })
+  if (result.status === "error") return result
 
   revalidatePath("/workspace/mis-cursos")
-  revalidatePath(`/workspace/mis-cursos/${moduleRow.course_id}`)
+  revalidatePath(`/workspace/mis-cursos/${lesson.courseId}`)
   return { status: "success", message: "Leccion eliminada" }
 }
 
@@ -860,6 +679,7 @@ export async function submitCoursePurchase(
  */
 export async function getPendingCoursePayments(): Promise<PendingCoursePayment[]> {
   const supabase = await createClient()
+  const paymentsRepo = makePaymentsRepository(supabase)
 
   const {
     data: { user },
@@ -872,53 +692,33 @@ export async function getPendingCoursePayments(): Promise<PendingCoursePayment[]
     .single()
   if (profile?.role !== "admin") return []
 
-  const { data, error } = await supabase
-    .from("payments")
-    .select(`
-      id,
-      method,
-      status,
-      proof_url,
-      created_at,
-      enrollment:enrollments!payments_enrollment_id_fkey (
-        id,
-        status,
-        course_id,
-        paid_amount,
-        student:profiles!enrollments_student_id_fkey (
-          id,
-          name,
-          email
-        ),
-        course:courses!enrollments_course_id_fkey (
-          id,
-          title,
-          price,
-          teacher:profiles!courses_teacher_id_fkey (
-            id,
-            name,
-            email
-          )
-        )
-      )
-    `)
-    .eq("status", "pending")
-    .order("created_at", { ascending: true })
-
-  if (error || !data) {
-    console.error("Error fetching pending course payments", error)
-    return []
-  }
-
-  const payments = data as PendingCoursePayment[]
-  const withSigned = await Promise.all(
-    payments.map(async (payment) => ({
-      ...payment,
-      proof_url_signed: await getSignedProofUrl(payment.proof_url),
-    })),
-  )
-
-  return withSigned
+  const payments = await paymentsRepo.listPendingPayments()
+  return payments.map((payment) => ({
+    id: payment.id,
+    method: payment.method,
+    status: payment.status,
+    proof_url: payment.proofUrl,
+    proof_url_signed: payment.proofUrlSigned ?? null,
+    created_at: payment.createdAt,
+    enrollment: {
+      id: payment.enrollment.id,
+      status: payment.enrollment.status,
+      course_id: payment.enrollment.courseId,
+      paid_amount: payment.enrollment.paidAmount,
+      student: payment.enrollment.student,
+      course: payment.enrollment.course
+        ? {
+            ...payment.enrollment.course,
+            teacher: payment.enrollment.course.teacher
+              ? {
+                  ...payment.enrollment.course.teacher,
+                  email: payment.enrollment.course.teacher.email ?? "",
+                }
+              : null,
+          }
+        : payment.enrollment.course,
+    },
+  }))
 }
 
 /**
@@ -926,6 +726,7 @@ export async function getPendingCoursePayments(): Promise<PendingCoursePayment[]
  */
 export async function payOutTeacher(teacherId: string): Promise<PurchaseFormState> {
   const supabase = await createClient()
+  const paymentsRepo = makePaymentsRepository(supabase)
 
   const {
     data: { user },
@@ -948,67 +749,19 @@ export async function payOutTeacher(teacherId: string): Promise<PurchaseFormStat
     return { status: "error", message: "Docente invalido" }
   }
 
-  const { data: payments, error } = await supabase
-    .from("payments")
-    .select(`
-      id,
-      status,
-      payout_id,
-      enrollment:enrollments!payments_enrollment_id_fkey (
-        paid_amount,
-        course:courses!enrollments_course_id_fkey (
-          teacher_id
-        )
-      )
-    `)
-    .eq("status", "verified")
-    .is("payout_id", null)
-
-  if (error || !payments) {
-    console.error("Error fetching payments for payout", error)
-    return { status: "error", message: "No pudimos calcular el pago" }
-  }
-
-  const eligible = payments.filter(
-    (p) => p.enrollment?.course?.teacher_id === teacherId,
-  )
+  const eligible = await paymentsRepo.getVerifiedPaymentsForTeacher(teacherId)
 
   if (eligible.length === 0) {
     return { status: "error", message: "No hay pagos verificados pendientes para este docente" }
   }
 
-  const amount = eligible.reduce(
-    (acc, curr) => acc + (curr.enrollment?.paid_amount || 0),
-    0,
-  )
+  const amount = eligible.reduce((acc, curr) => acc + (curr?.paidAmount || 0), 0)
 
-  const { data: payout, error: payoutError } = await supabase
-    .from("payouts")
-    .insert({
-      teacher_id: teacherId,
-      amount,
-      status: "paid",
-      paid_at: new Date().toISOString(),
-    })
-    .select("id")
-    .single()
+  const payout = await paymentsRepo.createPayout(teacherId, amount)
 
-  if (payoutError || !payout) {
-    console.error("Error creating payout", payoutError)
-    return { status: "error", message: "No pudimos registrar el payout" }
-  }
+  const paymentIds = eligible.map((p) => p?.id).filter(Boolean) as string[]
 
-  const paymentIds = eligible.map((p) => p.id)
-
-  const { error: updatePaymentsError } = await supabase
-    .from("payments")
-    .update({ payout_id: payout.id })
-    .in("id", paymentIds)
-
-  if (updatePaymentsError) {
-    console.error("Error linking payments to payout", updatePaymentsError)
-    return { status: "error", message: "Payout creado, pero no pudimos asociar los pagos" }
-  }
+  await paymentsRepo.linkPaymentsToPayout(paymentIds, payout.id)
 
   revalidatePath("/admin/courses/payouts")
 
@@ -1020,6 +773,7 @@ export async function payOutTeacher(teacherId: string): Promise<PurchaseFormStat
  */
 export async function verifyCoursePayment(paymentId: string): Promise<PurchaseFormState> {
   const supabase = await createClient()
+  const paymentsRepo = makePaymentsRepository(supabase)
 
   const {
     data: { user },
@@ -1041,64 +795,9 @@ export async function verifyCoursePayment(paymentId: string): Promise<PurchaseFo
     return { status: "error", message: "ID de pago invalido" }
   }
 
-  const { data: payment, error: paymentError } = await supabase
-    .from("payments")
-    .select(`
-      id,
-      status,
-      enrollment:enrollments!payments_enrollment_id_fkey (
-        id,
-        status,
-        course_id,
-        student_id,
-        course:courses!enrollments_course_id_fkey (
-          id,
-          price
-        )
-      )
-    `)
-    .eq("id", paymentId)
-    .single()
-
-  if (paymentError || !payment) {
-    return { status: "error", message: "Pago no encontrado" }
-  }
-
-  if (payment.status !== "pending") {
-    return { status: "error", message: "El pago ya fue procesado" }
-  }
-
-  const enrollmentId = payment.enrollment?.id
-  const coursePrice = payment.enrollment?.course?.price ?? 0
-
-  const { error: updatePaymentError } = await supabase
-    .from("payments")
-    .update({
-      status: "verified",
-      verified_at: new Date().toISOString(),
-      verified_by: user.id,
-    })
-    .eq("id", paymentId)
-
-  if (updatePaymentError) {
-    console.error("Error updating payment", updatePaymentError)
-    return { status: "error", message: "No pudimos actualizar el pago" }
-  }
-
-  if (enrollmentId) {
-    const { error: enrollmentError } = await supabase
-      .from("enrollments")
-      .update({
-        status: "active",
-        paid_amount: coursePrice,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", enrollmentId)
-
-    if (enrollmentError) {
-      console.error("Error activating enrollment", enrollmentError)
-      return { status: "error", message: "Pago verificado, pero no pudimos activar la inscripcion" }
-    }
+  const result = await verifyCoursePaymentUC(paymentId, user.id, { paymentsRepo })
+  if (result.status === "error") {
+    return { status: "error", message: result.message }
   }
 
   revalidatePath("/admin/courses/payments")
@@ -1228,6 +927,7 @@ export async function getCourseModulesWithLessons(
  */
 export async function getTeacherCoursePayments(): Promise<{ payments: TeacherCoursePayment[]; error?: string }> {
   const supabase = await createClient()
+  const paymentsRepo = makePaymentsRepository(supabase)
   const {
     data: { user },
     error: userError,
@@ -1239,88 +939,22 @@ export async function getTeacherCoursePayments(): Promise<{ payments: TeacherCou
     return { payments: [], error: "No autorizado" }
   }
 
-  const { data, error } = await supabase
-    .from("payments")
-    .select(
-      `
-        id,
-        status,
-        payout_id,
-        method,
-        created_at,
-        verified_at,
-        enrollment:enrollments!payments_enrollment_id_fkey (
-          id,
-          status,
-          student:profiles!enrollments_student_id_fkey (
-            id,
-            name,
-            email
-          ),
-          course:courses!enrollments_course_id_fkey (
-            id,
-            title,
-            price,
-            teacher_id
-          )
-        )
-      `,
-    )
-    .eq("enrollment.course.teacher_id", user.id)
-    .order("created_at", { ascending: false })
-
-  if (error || !data) {
-    console.error("Error fetching teacher course payments", error)
-    return { payments: [], error: "No pudimos obtener los pagos de tus cursos" }
-  }
-
-  return { payments: data as TeacherCoursePayment[] }
+  const payments = await paymentsRepo.listTeacherPayments(user.id)
+  return { payments }
 }
 
 export async function getCoursePaymentsInCustody(): Promise<CoursePaymentInCustody[]> {
   const supabase = await createClient()
-  const { data, error } = await supabase
-    .from("payments")
-    .select(
-      `
-        id,
-        status,
-        payout_id,
-        method,
-        created_at,
-        verified_at,
-        enrollment:enrollments!payments_enrollment_id_fkey (
-          id,
-          status,
-          student:profiles!enrollments_student_id_fkey (
-            id,
-            name,
-            email
-          ),
-          course:courses!enrollments_course_id_fkey (
-            id,
-            title,
-            price,
-            teacher_id,
-            teacher:profiles!courses_teacher_id_fkey (
-              id,
-              name,
-              email
-            )
-          )
-        )
-      `,
-    )
-    .eq("status", "verified")
-    .is("payout_id", null)
-    .order("created_at", { ascending: false })
+  const paymentsRepo = makePaymentsRepository(supabase)
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return []
 
-  if (error || !data) {
-    console.error("Error fetching course payments in custody", error)
-    return []
-  }
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single()
+  if (profile?.role !== "admin") return []
 
-  return data as CoursePaymentInCustody[]
+  return paymentsRepo.listPaymentsInCustody()
 }
 
 /** 
@@ -1331,54 +965,17 @@ export async function markLessonCompleted(payload: MarkLessonInput): Promise<Pur
   const { data: userResult } = await supabase.auth.getUser()
   if (!userResult.user) return { status: "error", message: "No autenticado" }
 
-  const parsed = markLessonSchema.safeParse(payload)
-  if (!parsed.success) {
-    return { status: "error", message: "Datos invalidos" }
+  const progressRepo = makeLessonProgressRepository(supabase)
+  const result = await markLessonCompletedUC(
+    { lessonId: payload.lessonId, studentId: userResult.user.id },
+    { progressRepo },
+  )
+
+  if (result.status === "success") {
+    revalidatePath(`/workspace/cursos/${result.courseId}`)
   }
 
-  const { data: lesson } = await supabase
-    .from("lessons")
-    .select("id, module_id")
-    .eq("id", parsed.data.lessonId)
-    .single()
-
-  if (!lesson) return { status: "error", message: "Leccion no encontrada" }
-
-  const moduleId = (lesson as { module_id: string }).module_id
-
-  const { data: moduleRow } = await supabase
-    .from("course_modules")
-    .select("course_id")
-    .eq("id", moduleId)
-    .single()
-  if (!moduleRow) return { status: "error", message: "Modulo no encontrado" }
-
-  const { data: enrollment } = await supabase
-    .from("enrollments")
-    .select("id, status")
-    .eq("course_id", moduleRow.course_id)
-    .eq("student_id", userResult.user.id)
-    .eq("status", "active")
-    .single()
-
-  if (!enrollment) {
-    return { status: "error", message: "Necesitas una inscripcion activa para marcar progreso" }
-  }
-
-  const { error } = await supabase
-    .from("lesson_progress")
-    .insert({
-      enrollment_id: enrollment.id,
-      lesson_id: parsed.data.lessonId,
-    })
-
-  if (error && (error as { code?: string }).code !== "23505") {
-    console.error("Error marking progress", error)
-    return { status: "error", message: "No pudimos guardar el progreso" }
-  }
-
-  revalidatePath(`/workspace/cursos/${moduleRow.course_id}`)
-  return { status: "success", message: "Leccion completada" }
+  return { status: result.status, message: result.message }
 }
 
 /**
@@ -1422,7 +1019,7 @@ export async function approveCoursePayment(
     .single()
 
   if (enrollmentError || !enrollment) {
-    return { status: "error", message: "Inscripción no encontrada" }
+    return { status: "error", message: "InscripciÃƒÂ³n no encontrada" }
   }
 
   // Update payment status to verified
@@ -1447,7 +1044,7 @@ export async function approveCoursePayment(
 
   if (enrollmentUpdateError) {
     console.error("Error updating enrollment", enrollmentUpdateError)
-    return { status: "error", message: "No pudimos activar la inscripción" }
+    return { status: "error", message: "No pudimos activar la inscripciÃƒÂ³n" }
   }
 
   revalidatePath("/admin/transactions")
@@ -1506,7 +1103,7 @@ export async function rejectCoursePayment(
 
   if (enrollmentError) {
     console.error("Error updating enrollment", enrollmentError)
-    return { status: "error", message: "No pudimos rechazar la inscripción" }
+    return { status: "error", message: "No pudimos rechazar la inscripciÃƒÂ³n" }
   }
 
   revalidatePath("/admin/transactions")

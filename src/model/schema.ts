@@ -1331,6 +1331,59 @@ export type Database = {
           },
         ]
       }
+      teacher_bank_accounts: {
+        Row: {
+          account_alias: string | null
+          account_holder: string
+          account_number: string
+          account_type: string | null
+          bank_name: string
+          country: string | null
+          created_at: string
+          currency: string | null
+          id: string
+          routing_number: string | null
+          teacher_id: string
+          updated_at: string
+        }
+        Insert: {
+          account_alias?: string | null
+          account_holder: string
+          account_number: string
+          account_type?: string | null
+          bank_name: string
+          country?: string | null
+          created_at?: string
+          currency?: string | null
+          id?: string
+          routing_number?: string | null
+          teacher_id: string
+          updated_at?: string
+        }
+        Update: {
+          account_alias?: string | null
+          account_holder?: string
+          account_number?: string
+          account_type?: string | null
+          bank_name?: string
+          country?: string | null
+          created_at?: string
+          currency?: string | null
+          id?: string
+          routing_number?: string | null
+          teacher_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "teacher_bank_accounts_teacher_id_fkey"
+            columns: ["teacher_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       teacher_reviews: {
         Row: {
           comment: string | null

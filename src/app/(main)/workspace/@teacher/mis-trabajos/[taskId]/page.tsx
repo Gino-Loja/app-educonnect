@@ -333,9 +333,7 @@ export default async function TeacherWorkDetailPage({ params }: TaskDetailProps)
                   Revisar hitos
                 </Link>
               </Button>
-              {(task.status === "in_progress" || task.status === "submitted") && (
-                <CompleteTaskButton taskId={task.id} />
-              )}
+              {task.status === "submitted" && <CompleteTaskButton taskId={task.id} />}
             </div>
             {task.status !== "in_progress" ? (
               <p className="text-xs text-muted-foreground">

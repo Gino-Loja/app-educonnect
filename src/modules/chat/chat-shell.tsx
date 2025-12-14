@@ -13,13 +13,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { IconMessage, IconPaperclip, IconSend } from "@tabler/icons-react"
 import { createClient } from "@/utils/supabase/client"
 import type { Database } from "@/model/schema"
-import {
-  ChatContact,
-  ChatMessage,
-  ensureConversationForTask,
-  getConversationMessages,
-  sendChatMessage,
-} from "@/lib/data/chat-actions"
+import { ensureConversationForTask, getConversationMessages, sendChatMessage } from "@/lib/data/chat-actions"
+import type { ChatContact, ChatMessage } from "@/lib/data/chat-types"
 
 type ChatShellProps = {
   contacts: ChatContact[]
@@ -92,25 +87,44 @@ export function ChatShell({ contacts, currentUser }: ChatShellProps) {
     })
   }, [])
 
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
+
   const loadMessages = useCallback(
-    async (conversationId: string) => {
-      setLoadingMessages(true)
+    async (conversationId: string, offset = 0, append = false) => {
+      if (offset === 0) {
+        setLoadingMessages(true)
+      } else {
+        setLoadingMore(true)
+      }
       try {
-        const response = await getConversationMessages(conversationId)
+        const response = await getConversationMessages(conversationId, { offset, limit: 10 })
 
         if (response.status === "error") {
-          reportError(response.message || "No se pudieron cargar los mensajes")
-          setMessages([])
+          const errorMessage =
+            "message" in response && response.message
+              ? response.message
+              : "No se pudieron cargar los mensajes"
+          reportError(errorMessage)
+          if (!append) setMessages([])
           return
         }
 
-        setMessages(response.messages || [])
-        scrollToBottom()
+        const fetched = (response.messages as ChatMessage[]) || []
+        setHasMore(fetched.length === 10)
+
+        if (append) {
+          setMessages((prev) => [...fetched, ...prev] as ChatMessage[])
+        } else {
+          setMessages(fetched)
+          scrollToBottom()
+        }
       } catch (error) {
         reportError("No se pudieron cargar los mensajes", error)
-        setMessages([])
+        if (!append) setMessages([])
       } finally {
         setLoadingMessages(false)
+        setLoadingMore(false)
       }
     },
     [scrollToBottom],
@@ -127,7 +141,7 @@ export function ChatShell({ contacts, currentUser }: ChatShellProps) {
     (conversationId: string) => {
       clearFallbackPolling()
       fallbackIntervalRef.current = setInterval(() => {
-        loadMessages(conversationId)
+        loadMessages(conversationId, 0, false)
       }, 3000)
     },
     [clearFallbackPolling, loadMessages],
@@ -141,7 +155,9 @@ export function ChatShell({ contacts, currentUser }: ChatShellProps) {
         const response = await ensureConversationForTask(contact.taskId)
 
         if (response.status === "error" || !response.conversation) {
-          reportError(response.message || "No se pudo abrir el chat")
+          const errorMessage =
+            "message" in response && response.message ? response.message : "No se pudo abrir el chat"
+          reportError(errorMessage)
           return null
         }
 
@@ -171,10 +187,11 @@ export function ChatShell({ contacts, currentUser }: ChatShellProps) {
     async (contact: ChatContact) => {
       setSelectedContact(contact)
       setMessages([]) // Limpia mensajes inmediatamente
+      setHasMore(false)
       try {
         const conversationId = await ensureConversation(contact)
         if (conversationId) {
-          await loadMessages(conversationId)
+          await loadMessages(conversationId, 0, false)
           setLastSeen((prev) => ({ ...prev, [contact.taskId]: new Date().toISOString() }))
         }
       } catch (error) {
@@ -192,7 +209,7 @@ export function ChatShell({ contacts, currentUser }: ChatShellProps) {
     const bootstrap = async () => {
       const conversationId = await ensureConversation(selectedContact)
       if (!conversationId || cancelled) return
-      await loadMessages(conversationId)
+      await loadMessages(conversationId, 0, false)
     }
 
     bootstrap()
@@ -302,7 +319,7 @@ export function ChatShell({ contacts, currentUser }: ChatShellProps) {
             if (status === "TIMED_OUT" || status === "CLOSED") {
               setRealtimeConnected(false)
               startFallbackPolling(conversationId)
-              await loadMessages(conversationId)
+      await loadMessages(conversationId, 0, false)
             }
           })
 
@@ -470,7 +487,9 @@ export function ChatShell({ contacts, currentUser }: ChatShellProps) {
       const response = await sendChatMessage(conversationId, trimmed)
 
       if (response.status === "error" || !response.newMessage) {
-        reportError(response.message || "No se pudo enviar el mensaje")
+        const errorMessage =
+          "message" in response && response.message ? response.message : "No se pudo enviar el mensaje"
+        reportError(errorMessage)
         return
       }
 
@@ -645,6 +664,18 @@ export function ChatShell({ contacts, currentUser }: ChatShellProps) {
                   </div>
                 ) : (
                   <div className="flex flex-col gap-2">
+                    {hasMore && selectedContact?.conversationId && (
+                      <div className="flex justify-center">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={loadingMore}
+                          onClick={() => loadMessages(selectedContact.conversationId!, messages.length, true)}
+                        >
+                          {loadingMore ? "Cargando..." : "Cargar mensajes anteriores"}
+                        </Button>
+                      </div>
+                    )}
                     {messages.map((msg) => {
                       const isMine = msg.sender_id === currentUser.id
                       return (

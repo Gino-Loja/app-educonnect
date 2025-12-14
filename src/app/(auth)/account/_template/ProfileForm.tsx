@@ -200,29 +200,6 @@ export default function ProfileForm({ profileId, initialData, compact = false }:
                                             </label>
                                         </div>
                                     </div>
-
-                                    <div className="relative">
-                                        <div className="absolute inset-0 flex items-center">
-                                            <span className="w-full border-t border-gray-200" />
-                                        </div>
-                                        <div className="relative flex justify-center text-xs uppercase">
-                                            <span className="bg-white px-3 text-gray-500 font-medium">O</span>
-                                        </div>
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <Label htmlFor="profilePictureUrl" className="text-sm font-medium text-gray-700">
-                                            URL de imagen
-                                        </Label>
-                                        <Input
-                                            id="profilePictureUrl"
-                                            name="profilePictureUrl"
-                                            type="url"
-                                            placeholder="https://ejemplo.com/imagen.jpg"
-                                            defaultValue={initialData?.profile_picture_url || ''}
-                                            className="border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-                                        />
-                                    </div>
                                 </div>
                             </div>
                         </div>

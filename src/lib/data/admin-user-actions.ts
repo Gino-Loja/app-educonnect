@@ -130,10 +130,12 @@ export async function toggleUserStatus(userId: string): Promise<{
 
 type StudentProfile = Database["public"]["Tables"]["students"]["Row"]
 type TeacherProfile = Database["public"]["Tables"]["teachers"]["Row"]
+type TeacherBankAccount = Database["public"]["Tables"]["teacher_bank_accounts"]["Row"]
 
 export type UserDetail = User & {
   student: StudentProfile | null
   teacher: TeacherProfile | null
+  teacher_bank_account: TeacherBankAccount | null
 }
 
 export async function getUserById(userId: string): Promise<{
@@ -150,7 +152,8 @@ export async function getUserById(userId: string): Promise<{
         `
         *,
         student:students!students_id_fkey(*),
-        teacher:teachers!teachers_id_fkey(*)
+        teacher:teachers!teachers_id_fkey(*),
+        teacher_bank_account:teacher_bank_accounts(*)
       `
       )
       .eq("id", userId)

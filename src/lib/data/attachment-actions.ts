@@ -2,6 +2,7 @@
 
 import { createClient } from "@/utils/supabase/server"
 import { revalidatePath } from "next/cache"
+import { deleteFromMinio, parseObjectName, signMinioUrl, uploadToMinio } from "@/infrastructure/minio/storage"
 
 export type AttachmentType = "task_reference" | "milestone_submission" | "final_delivery"
 
@@ -27,6 +28,7 @@ export type ActionState = {
 
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024 // 10MB
 const FINAL_ALLOWED_STATUSES = ["in_custody", "paid"]
+const TASK_ATTACHMENTS_BUCKET = process.env.MINIO_TASK_ATTACHMENTS_BUCKET || "task-attachments"
 
 function sanitizeFileName(name: string) {
     return (name || "archivo").replace(/[^a-zA-Z0-9.-]/g, "_")
@@ -150,21 +152,20 @@ export async function uploadTaskAttachment(
                     : "final"
         const storagePath = `${taskId}/${baseFolder}/${milestoneId || "general"}/${timestamp}_${sanitizedFileName}`
 
-        const { error: uploadError } = await supabase.storage
-            .from("task-attachments")
-            .upload(storagePath, file, {
-                contentType: file.type || "application/octet-stream",
-                upsert: false,
-            })
+        const uploadResult = await uploadToMinio({
+            bucket: TASK_ATTACHMENTS_BUCKET,
+            file,
+            objectName: storagePath,
+        }).catch((error) => {
+            console.error("Error uploading file to MinIO:", error)
+            return null
+        })
 
-        if (uploadError) {
-            console.error("Error uploading file:", uploadError)
+        if (!uploadResult) {
             return { status: "error", message: "Error al subir el archivo" }
         }
 
-        const {
-            data: { publicUrl },
-        } = supabase.storage.from("task-attachments").getPublicUrl(storagePath)
+        const filePath = `${TASK_ATTACHMENTS_BUCKET}/${uploadResult.objectName}`
 
         const { data: attachment, error: dbError } = await supabase
             .from("task_attachments")
@@ -172,7 +173,7 @@ export async function uploadTaskAttachment(
                 task_id: taskId,
                 uploaded_by: user.id,
                 file_name: file.name,
-                file_url: publicUrl,
+                file_url: filePath,
                 file_size: file.size,
                 file_type: file.type || null,
                 attachment_type: attachmentType,
@@ -184,7 +185,7 @@ export async function uploadTaskAttachment(
 
         if (dbError) {
             console.error("Error creating attachment record:", dbError)
-            await supabase.storage.from("task-attachments").remove([storagePath])
+            await deleteFromMinio(TASK_ATTACHMENTS_BUCKET, uploadResult.objectName)
             return { status: "error", message: "Error al guardar el archivo" }
         }
 
@@ -232,7 +233,14 @@ export async function getTaskAttachments(
             return { attachments: [], error: "Error al obtener archivos adjuntos" }
         }
 
-        return { attachments: data as TaskAttachment[], error: null }
+        const attachments = await Promise.all(
+            ((data as TaskAttachment[] | null | undefined) ?? []).map(async (attachment) => {
+                const signedUrl = await signMinioUrl(attachment.file_url)
+                return signedUrl ? { ...attachment, file_url: signedUrl } : attachment
+            })
+        )
+
+        return { attachments, error: null }
     } catch (error) {
         console.error("Unexpected error fetching attachments:", error)
         return { attachments: [], error: "Error inesperado" }
@@ -274,16 +282,9 @@ export async function deleteTaskAttachment(attachmentId: string): Promise<Action
             return { status: "error", message: "No tienes permiso para eliminar este archivo" }
         }
 
-        const url = new URL(attachment.file_url)
-        const pathParts = url.pathname.split("/")
-        const storagePath = pathParts.slice(pathParts.indexOf("task-attachments") + 1).join("/")
-
-        const { error: storageError } = await supabase.storage
-            .from("task-attachments")
-            .remove([storagePath])
-
-        if (storageError) {
-            console.error("Error deleting file from storage:", storageError)
+        const parsedPath = parseObjectName(attachment.file_url)
+        if (parsedPath) {
+            await deleteFromMinio(parsedPath.bucket || TASK_ATTACHMENTS_BUCKET, parsedPath.objectName)
         }
 
         const { error: dbError } = await supabase

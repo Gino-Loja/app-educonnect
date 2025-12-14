@@ -1,8 +1,16 @@
 "use server"
 
-import { createClient } from "@/utils/supabase/server"
-import type { Json } from "@/model/schema"
-import { revalidatePath } from "next/cache"
+import {
+  createNotification as createNotificationUseCase,
+  deleteNotification as deleteNotificationUseCase,
+  getNotifications as getNotificationsUseCase,
+  getUnreadNotificationCount as getUnreadNotificationCountUseCase,
+  markAllNotificationsAsRead as markAllNotificationsAsReadUseCase,
+  markNotificationAsRead as markNotificationAsReadUseCase,
+} from "@/application/notifications/notifications"
+import type { Notification as DomainNotification } from "@/domain/notifications"
+import { requireUser, revalidatePaths } from "@/infrastructure/auth/server-auth"
+import { makeNotificationsRepository } from "@/infrastructure/supabase/notifications-repo"
 
 export type Notification = {
   id: string
@@ -17,30 +25,32 @@ export type Notification = {
   read_at: string | null
 }
 
+const mapNotificationToClient = (notification: DomainNotification): Notification => ({
+  id: notification.id,
+  user_id: notification.userId,
+  type: notification.type,
+  title: notification.title,
+  message: notification.message,
+  link: notification.link ?? null,
+  is_read: notification.isRead,
+  metadata: notification.metadata ?? null,
+  created_at: notification.createdAt,
+  read_at: notification.readAt ?? null,
+})
+
 /**
  * Get unread notification count for current user
  */
 export async function getUnreadNotificationCount(): Promise<number> {
   try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const auth = await requireUser()
 
-    if (!user) {
+    if ("error" in auth) {
       return 0
     }
 
-    const { count, error } = await supabase
-      .from("notifications")
-      .select("*", { count: "exact", head: true })
-      .eq("user_id", user.id)
-      .eq("is_read", false)
-
-    if (error) {
-      console.error("Error fetching unread count:", error)
-      return 0
-    }
-
-    return count || 0
+    const notificationsRepo = makeNotificationsRepository(auth.supabase)
+    return await getUnreadNotificationCountUseCase(auth.user.id, { notificationsRepo })
   } catch (error) {
     console.error("Unexpected error fetching unread count:", error)
     return 0
@@ -55,46 +65,26 @@ export async function getNotifications(options?: {
   offset?: number
   unreadOnly?: boolean
 }): Promise<{ notifications: Notification[]; total: number }> {
-  try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+  const auth = await requireUser()
 
-    if (!user) {
-      return { notifications: [], total: 0 }
-    }
-
-    const limit = options?.limit || 10
-    const offset = options?.offset || 0
-
-    let query = supabase
-      .from("notifications")
-      .select("*", { count: "exact" })
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-
-    if (options?.unreadOnly) {
-      query = query.eq("is_read", false)
-    }
-
-    const { data, error, count } = await query.range(offset, offset + limit - 1)
-
-    if (error) {
-      console.error("Error fetching notifications:", error)
-      return { notifications: [], total: 0 }
-    }
-
-    return {
-      notifications: (data || []).map((n) => ({
-        ...n,
-        is_read: n.is_read ?? false,
-        created_at: n.created_at || new Date().toISOString(),
-        metadata: (n.metadata as Record<string, unknown>) || null,
-      })),
-      total: count || 0,
-    }
-  } catch (error) {
-    console.error("Unexpected error fetching notifications:", error)
+  if ("error" in auth) {
     return { notifications: [], total: 0 }
+  }
+
+  const notificationsRepo = makeNotificationsRepository(auth.supabase)
+  const result = await getNotificationsUseCase(
+    auth.user.id,
+    {
+      limit: options?.limit,
+      offset: options?.offset,
+      unreadOnly: options?.unreadOnly,
+    },
+    { notificationsRepo },
+  )
+
+  return {
+    notifications: result.notifications.map(mapNotificationToClient),
+    total: result.total,
   }
 }
 
@@ -106,26 +96,20 @@ export async function markNotificationAsRead(notificationId: string): Promise<{
   message: string
 }> {
   try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const auth = await requireUser()
 
-    if (!user) {
+    if ("error" in auth) {
       return { status: "error", message: "No autenticado" }
     }
 
-    const { error } = await supabase
-      .from("notifications")
-      .update({ is_read: true, read_at: new Date().toISOString() })
-      .eq("id", notificationId)
-      .eq("user_id", user.id) // Security: only update own notifications
+    const notificationsRepo = makeNotificationsRepository(auth.supabase)
+    const result = await markNotificationAsReadUseCase(auth.user.id, notificationId, { notificationsRepo })
 
-    if (error) {
-      console.error("Error marking notification as read:", error)
-      return { status: "error", message: "Error al marcar como leída" }
+    if (result.status === "success") {
+      revalidatePaths(["/workspace"])
     }
 
-    revalidatePath("/workspace")
-    return { status: "success", message: "Notificación marcada como leída" }
+    return result
   } catch (error) {
     console.error("Unexpected error marking notification as read:", error)
     return { status: "error", message: "Error inesperado" }
@@ -140,26 +124,18 @@ export async function markAllNotificationsAsRead(): Promise<{
   message: string
 }> {
   try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const auth = await requireUser()
 
-    if (!user) {
+    if ("error" in auth) {
       return { status: "error", message: "No autenticado" }
     }
 
-    const { error } = await supabase
-      .from("notifications")
-      .update({ is_read: true, read_at: new Date().toISOString() })
-      .eq("user_id", user.id)
-      .eq("is_read", false)
-
-    if (error) {
-      console.error("Error marking all notifications as read:", error)
-      return { status: "error", message: "Error al marcar todas como leídas" }
+    const notificationsRepo = makeNotificationsRepository(auth.supabase)
+    const result = await markAllNotificationsAsReadUseCase(auth.user.id, { notificationsRepo })
+    if (result.status === "success") {
+      revalidatePaths(["/workspace"])
     }
-
-    revalidatePath("/workspace")
-    return { status: "success", message: "Todas las notificaciones marcadas como leídas" }
+    return result
   } catch (error) {
     console.error("Unexpected error marking all notifications as read:", error)
     return { status: "error", message: "Error inesperado" }
@@ -174,26 +150,18 @@ export async function deleteNotification(notificationId: string): Promise<{
   message: string
 }> {
   try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const auth = await requireUser()
 
-    if (!user) {
+    if ("error" in auth) {
       return { status: "error", message: "No autenticado" }
     }
 
-    const { error } = await supabase
-      .from("notifications")
-      .delete()
-      .eq("id", notificationId)
-      .eq("user_id", user.id) // Security: only delete own notifications
-
-    if (error) {
-      console.error("Error deleting notification:", error)
-      return { status: "error", message: "Error al eliminar notificación" }
+    const notificationsRepo = makeNotificationsRepository(auth.supabase)
+    const result = await deleteNotificationUseCase(auth.user.id, notificationId, { notificationsRepo })
+    if (result.status === "success") {
+      revalidatePaths(["/workspace"])
     }
-
-    revalidatePath("/workspace")
-    return { status: "success", message: "Notificación eliminada" }
+    return result
   } catch (error) {
     console.error("Unexpected error deleting notification:", error)
     return { status: "error", message: "Error inesperado" }
@@ -212,24 +180,21 @@ export async function createNotification(params: {
   metadata?: Record<string, unknown>
 }): Promise<{ status: "success" | "error"; message: string }> {
   try {
-    const supabase = await createClient()
+    const auth = await requireUser()
+    const notificationsRepo = makeNotificationsRepository(auth.supabase)
+    const result = await createNotificationUseCase(
+      {
+        userId: params.userId,
+        type: params.type,
+        title: params.title,
+        message: params.message,
+        link: params.link ?? null,
+        metadata: params.metadata ?? null,
+      },
+      { notificationsRepo },
+    )
 
-    // Use the SECURITY DEFINER helper to satisfy RLS when notifying other users
-    const { error } = await supabase.rpc("create_notification", {
-      p_user_id: params.userId,
-      p_type: params.type,
-      p_title: params.title,
-      p_message: params.message,
-      p_link: params.link ?? undefined,
-      p_metadata: (params.metadata as unknown as Json) ?? undefined,
-    })
-
-    if (error) {
-      console.error("Error creating notification:", error)
-      return { status: "error", message: "Error al crear notificación" }
-    }
-
-    return { status: "success", message: "Notificación creada" }
+    return result
   } catch (error) {
     console.error("Unexpected error creating notification:", error)
     return { status: "error", message: "Error inesperado" }

@@ -1,5 +1,11 @@
 "use server"
 
+import {
+  createMilestonesForTask as createMilestonesUseCase,
+  submitPaymentProof as submitPaymentProofUseCase,
+} from "@/application/tasks/createTask"
+import { makeMilestonesRepository, makeTasksRepository } from "@/infrastructure/supabase/tasks-repo"
+import { deleteFromMinio, parseObjectName, signMinioUrl, uploadToMinio } from "@/infrastructure/minio/storage"
 import { createClient } from "@/utils/supabase/server"
 import { revalidatePath } from "next/cache"
 
@@ -32,6 +38,26 @@ export interface PaymentMilestone {
   updated_at: string
 }
 
+const PAYMENT_PROOF_BUCKET = process.env.MINIO_PAYMENT_PROOF_BUCKET || "comprobantes"
+
+function resolvePaymentProofObject(path: string) {
+  const parsed = parseObjectName(path)
+  if (parsed) {
+    if (parsed.bucket === PAYMENT_PROOF_BUCKET) {
+      return parsed
+    }
+    return { bucket: PAYMENT_PROOF_BUCKET, objectName: `${parsed.bucket}/${parsed.objectName}` }
+  }
+
+  return { bucket: PAYMENT_PROOF_BUCKET, objectName: path.replace(/^\//, "") }
+}
+
+async function signPaymentProofUrl(path: string | null) {
+  if (!path) return null
+  const resolved = resolvePaymentProofObject(path)
+  return await signMinioUrl(`${resolved.bucket}/${resolved.objectName}`)
+}
+
 /**
  * Creates payment milestones for a task based on number of installments
  */
@@ -41,6 +67,8 @@ export async function createMilestonesForTask(
   installments: number
 ) {
   const supabase = await createClient()
+  const tasksRepo = makeTasksRepository(supabase)
+  const milestonesRepo = makeMilestonesRepository(supabase)
 
   try {
     const {
@@ -51,35 +79,13 @@ export async function createMilestonesForTask(
       return { status: "error", message: "No autenticado" }
     }
 
-    // Verify task belongs to user
-    const { data: task } = await supabase
-      .from("tasks")
-      .select("id, student_id")
-      .eq("id", taskId)
-      .single()
+    const result = await createMilestonesUseCase(
+      { taskId, studentId: user.id, totalAmount, installments },
+      { tasksRepo, milestonesRepo },
+    )
 
-    if (!task || task.student_id !== user.id) {
-      return { status: "error", message: "Tarea no encontrada" }
-    }
-
-    // Calculate amount per milestone
-    const amountPerMilestone = totalAmount / installments
-
-    // Create milestones
-    const milestones = Array.from({ length: installments }, (_, index) => ({
-      task_id: taskId,
-      milestone_number: index + 1,
-      title: `Avance ${index + 1} de ${installments}`,
-      description: `Pago de cuota ${index + 1} por avance del trabajo`,
-      amount: amountPerMilestone,
-      status: "pending_payment" as const,
-    }))
-
-    const { error } = await supabase.from("payment_milestones").insert(milestones)
-
-    if (error) {
-      console.error("Error creating milestones:", error)
-      return { status: "error", message: "Error al crear hitos de pago" }
+    if (result.status === "error") {
+      return { status: "error", message: result.message }
     }
 
     revalidatePath("/workspace")
@@ -118,25 +124,10 @@ export async function getMilestonesByTaskId(taskId: string) {
     // Generate signed URLs for payment proofs
     const milestonesWithSignedUrls: PaymentMilestone[] = await Promise.all(
       (data || []).map(async (milestone) => {
-        if (milestone.payment_proof_url) {
-          let path = milestone.payment_proof_url
-          // Backward compatibility: if it's a full URL, extract the path
-          if (path.startsWith("http")) {
-            const parts = path.split("/comprobantes/")
-            if (parts.length > 1) {
-              path = parts[1]
-            }
-          }
+        if (!milestone.payment_proof_url) return milestone
 
-          const { data: signedData } = await supabase.storage
-            .from("comprobantes")
-            .createSignedUrl(path, 3600) // 1 hour expiry
-
-          if (signedData?.signedUrl) {
-            return { ...milestone, payment_proof_url: signedData.signedUrl }
-          }
-        }
-        return milestone
+        const signedUrl = await signPaymentProofUrl(milestone.payment_proof_url)
+        return signedUrl ? { ...milestone, payment_proof_url: signedUrl } : milestone
       })
     ) as PaymentMilestone[]
 
@@ -155,6 +146,7 @@ export async function submitPaymentProof(
   fileData: FormData
 ): Promise<{ status: "success" | "error"; message: string }> {
   const supabase = await createClient()
+  const milestonesRepo = makeMilestonesRepository(supabase)
 
   try {
     const {
@@ -165,19 +157,12 @@ export async function submitPaymentProof(
       return { status: "error", message: "No autenticado" }
     }
 
-    // Verify milestone exists and belongs to user's task
-    const { data: milestone, error: fetchError } = await supabase
-      .from("payment_milestones")
-      .select("id, task_id, tasks!inner(student_id)")
-      .eq("id", milestoneId)
-      .single()
-
-    if (fetchError || !milestone) {
+    const milestone = await milestonesRepo.findMilestoneOwner(milestoneId)
+    if (!milestone) {
       return { status: "error", message: "Hito de pago no encontrado" }
     }
 
-    const task = milestone.tasks as { student_id: string }
-    if (task.student_id !== user.id) {
+    if (milestone.studentId !== user.id) {
       return { status: "error", message: "No tienes permiso para actualizar este hito" }
     }
 
@@ -189,39 +174,39 @@ export async function submitPaymentProof(
       return { status: "error", message: "Faltan datos requeridos" }
     }
 
-    // Upload file to Supabase Storage
     const fileExt = file.name.split(".").pop()
     const fileName = `${user.id}/${milestoneId}-${Date.now()}.${fileExt}`
+    const uploadResult = await uploadToMinio({
+      bucket: PAYMENT_PROOF_BUCKET,
+      file,
+      objectName: fileName,
+    }).catch((error) => {
+      console.error("Error uploading payment proof to MinIO:", error)
+      return null
+    })
 
-    const { error: uploadError } = await supabase.storage
-      .from("comprobantes")
-      .upload(fileName, file, {
-        cacheControl: "3600",
-        upsert: false,
-      })
-
-    if (uploadError) {
-      console.error("Error uploading file:", uploadError)
+    if (!uploadResult) {
       return { status: "error", message: "Error al subir el archivo" }
     }
-    // Update milestone with payment proof
-    const { error } = await supabase
-      .from("payment_milestones")
-      .update({
-        status: "pending_verification",
-        payment_proof_url: fileName,
-        payment_reference: paymentReference,
-        submitted_at: new Date().toISOString(),
-      })
-      .eq("id", milestoneId)
 
-    if (error) {
-      console.error("Error submitting payment proof:", error)
-      return { status: "error", message: "Error al enviar comprobante de pago" }
+    const paymentProofPath = `${PAYMENT_PROOF_BUCKET}/${uploadResult.objectName}`
+    const result = await submitPaymentProofUseCase(
+      {
+        milestoneId,
+        studentId: user.id,
+        paymentProofUrl: paymentProofPath,
+        paymentReference,
+      },
+      { milestonesRepo },
+    )
+
+    if (result.status === "error") {
+      await deleteFromMinio(PAYMENT_PROOF_BUCKET, uploadResult.objectName)
+      return { status: "error", message: result.message }
     }
 
     revalidatePath("/workspace/pagos")
-    return { status: "success", message: "Comprobante enviado. En espera de verificación." }
+    return { status: "success", message: "Comprobante enviado. En espera de verificacion." }
   } catch (error) {
     console.error("Error in submitPaymentProof:", error)
     return { status: "error", message: "Error inesperado" }
@@ -281,25 +266,10 @@ export async function getStudentPaymentMilestones() {
     // Generate signed URLs for payment proofs
     const milestonesWithSignedUrls: PaymentMilestone[] = await Promise.all(
       (data || []).map(async (milestone) => {
-        if (milestone.payment_proof_url) {
-          let path = milestone.payment_proof_url
-          // Backward compatibility: if it's a full URL, extract the path
-          if (path.startsWith("http")) {
-            const parts = path.split("/comprobantes/")
-            if (parts.length > 1) {
-              path = parts[1]
-            }
-          }
+        if (!milestone.payment_proof_url) return milestone
 
-          const { data: signedData } = await supabase.storage
-            .from("comprobantes")
-            .createSignedUrl(path, 3600) // 1 hour expiry
-
-          if (signedData?.signedUrl) {
-            return { ...milestone, payment_proof_url: signedData.signedUrl }
-          }
-        }
-        return milestone
+        const signedUrl = await signPaymentProofUrl(milestone.payment_proof_url)
+        return signedUrl ? { ...milestone, payment_proof_url: signedUrl } : milestone
       })
     ) as PaymentMilestone[]
 
@@ -368,25 +338,10 @@ export async function getTeacherPaymentMilestones() {
     // Generate signed URLs for payment proofs
     const milestonesWithSignedUrls: PaymentMilestone[] = await Promise.all(
       (data || []).map(async (milestone) => {
-        if (milestone.payment_proof_url) {
-          let path = milestone.payment_proof_url
-          // Backward compatibility: if it's a full URL, extract the path
-          if (path.startsWith("http")) {
-            const parts = path.split("/comprobantes/")
-            if (parts.length > 1) {
-              path = parts[1]
-            }
-          }
+        if (!milestone.payment_proof_url) return milestone
 
-          const { data: signedData } = await supabase.storage
-            .from("comprobantes")
-            .createSignedUrl(path, 3600) // 1 hour expiry
-
-          if (signedData?.signedUrl) {
-            return { ...milestone, payment_proof_url: signedData.signedUrl }
-          }
-        }
-        return milestone
+        const signedUrl = await signPaymentProofUrl(milestone.payment_proof_url)
+        return signedUrl ? { ...milestone, payment_proof_url: signedUrl } : milestone
       })
     ) as PaymentMilestone[]
 

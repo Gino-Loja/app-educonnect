@@ -7,6 +7,10 @@ const sidebarNavItems = [
         href: "/workspace/configuracion/cuenta",
     },
     {
+        title: "Cuenta bancaria",
+        href: "/workspace/configuracion/cuenta-bancaria",
+    },
+    {
         title: "Perfil",
         href: "/workspace/configuracion/perfil",
     },
@@ -20,9 +24,9 @@ export default function TeacherSettingsLayout({ children }: SettingsLayoutProps)
     return (
         <div className="space-y-6 p-10 pb-16 block">
             <div className="space-y-0.5">
-                <h2 className="text-2xl font-bold tracking-tight">Configuración</h2>
+                <h2 className="text-2xl font-bold tracking-tight">Configuracion</h2>
                 <p className="text-muted-foreground">
-                    Administra la configuración profesional y de cuenta.
+                    Administra la configuracion profesional y de cuenta.
                 </p>
             </div>
             <Separator className="my-6" />

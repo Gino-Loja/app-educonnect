@@ -1,14 +1,22 @@
 import Link from "next/link"
 import Image from "next/image"
 import { redirect } from "next/navigation"
-import { IconBook, IconClock, IconSchool, IconShoppingCart } from "@tabler/icons-react"
+import { IconBook, IconClock, IconSchool, IconShoppingCart, IconSearch } from "@tabler/icons-react"
 
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { createClient } from "@/utils/supabase/server"
 import { signLessonUrl } from "@/lib/data/course-actions"
+import { Input } from "@/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Button } from "@/components/ui/button"
 
 type EnrolledCourse = {
   id: string
@@ -29,8 +37,6 @@ type PublishedCourse = {
   teacher: string
   price: number
   signed_cover_url: string | null
-  moduleCount: number
-  lessonCount: number
 }
 
 type EnrollmentRow = {
@@ -63,7 +69,20 @@ function formatCurrency(value: number) {
   }).format(value || 0)
 }
 
-export default async function MisCursosPage() {
+type Props = {
+  searchParams?: { page?: string; q?: string; sort?: string }
+}
+
+const PAGE_SIZE = 20
+
+export default async function MisCursosPage({ searchParams }: Props) {
+  const { page: pageParam, q: queryParam, sort: sortParam } = searchParams ?? {}
+  const page = Math.max(1, Number(pageParam) || 1)
+  const searchQuery = (queryParam || "").trim()
+  const sortOption = ["recent", "old", "price_desc", "price_asc"].includes(sortParam || "")
+    ? (sortParam as "recent" | "old" | "price_desc" | "price_asc")
+    : "recent"
+
   const supabase = await createClient()
   const {
     data: { user },
@@ -180,10 +199,11 @@ export default async function MisCursosPage() {
     .map((e) => e.course?.id)
     .filter((id): id is string => Boolean(id))
 
-  // Fetch all published courses
-  const { data: publishedCoursesData = [] } = await supabase
+  // Fetch published courses for catalog with paging and search
+  let catalogQuery = supabase
     .from("courses")
-    .select(`
+    .select(
+      `
       id,
       title,
       description,
@@ -192,33 +212,42 @@ export default async function MisCursosPage() {
       teacher:profiles!courses_teacher_id_fkey (
         name
       )
-    `)
+    `,
+      { count: "exact" },
+    )
     .eq("status", "published")
-    .order("created_at", { ascending: false })
 
-  // Fetch module and lesson counts for published courses
+  if (enrolledCourseIds.length > 0) {
+    catalogQuery = catalogQuery.not("id", "in", `(${enrolledCourseIds.join(",")})`)
+  }
+
+  if (searchQuery) {
+    catalogQuery = catalogQuery.ilike("title", `%${searchQuery}%`)
+  }
+
+  switch (sortOption) {
+    case "old":
+      catalogQuery = catalogQuery.order("created_at", { ascending: true })
+      break
+    case "price_desc":
+      catalogQuery = catalogQuery.order("price", { ascending: false }).order("created_at", { ascending: false })
+      break
+    case "price_asc":
+      catalogQuery = catalogQuery.order("price", { ascending: true }).order("created_at", { ascending: false })
+      break
+    case "recent":
+    default:
+      catalogQuery = catalogQuery.order("created_at", { ascending: false })
+      break
+  }
+
+  const { data: publishedCoursesData = [], count: catalogCount = 0 } = await catalogQuery
+    .range((page - 1) * PAGE_SIZE, page * PAGE_SIZE - 1)
+
   const publishedCourses: PublishedCourse[] = await Promise.all(
-    (publishedCoursesData as PublishedCourseRow[])
-      .filter((course) => !enrolledCourseIds.includes(course.id))
+    ((publishedCoursesData as PublishedCourseRow[]) || [])
+      .filter((course): course is PublishedCourseRow => Boolean(course && course.id))
       .map(async (course) => {
-        // Get module count
-        const { count: moduleCount } = await supabase
-          .from("course_modules")
-          .select("*", { count: "exact", head: true })
-          .eq("course_id", course.id)
-
-        // Get lesson count
-        const { data: modules = [] } = await supabase
-          .from("course_modules")
-          .select(`
-            lessons:lessons (
-              id
-            )
-          `)
-          .eq("course_id", course.id)
-
-        const lessonCount = (modules as ModuleWithLessons[]).flatMap((m) => m.lessons).length
-
         const signed_cover_url = await signLessonUrl(course.cover_url)
 
         return {
@@ -228,11 +257,11 @@ export default async function MisCursosPage() {
           teacher: course.teacher?.name || "Docente",
           price: course.price,
           signed_cover_url,
-          moduleCount: moduleCount || 0,
-          lessonCount,
         }
-      })
+      }),
   )
+
+  const totalPages = Math.max(1, Math.ceil((catalogCount ?? 0) / PAGE_SIZE))
 
   const activeCount = enrolledCourses.filter((course) => course.status === "active").length
   const completedCount = enrolledCourses.filter((course) => course.status === "completed").length
@@ -362,6 +391,35 @@ export default async function MisCursosPage() {
         </TabsContent>
 
         <TabsContent value="catalog" className="space-y-4 mt-6">
+          <Card className="p-4">
+            <form className="grid gap-3 md:grid-cols-[1fr_220px_auto] items-center" action="/workspace/mis-cursos">
+              <input type="hidden" name="tab" value="catalog" />
+              <div className="flex items-center gap-2">
+                <IconSearch className="h-4 w-4 text-muted-foreground" />
+                <Input
+                  name="q"
+                  placeholder="Buscar cursos por nombre"
+                  defaultValue={searchQuery}
+                  className="w-full"
+                />
+              </div>
+              <Select name="sort" defaultValue={sortOption}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Ordenar" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="recent">Recientes</SelectItem>
+                  <SelectItem value="old">Antiguos</SelectItem>
+                  <SelectItem value="price_desc">Precio: alto a bajo</SelectItem>
+                  <SelectItem value="price_asc">Precio: bajo a alto</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="flex items-center justify-end gap-2">
+                <Button type="submit" variant="secondary">Filtrar</Button>
+              </div>
+            </form>
+          </Card>
+
           {publishedCourses.length === 0 ? (
             <Card>
               <CardContent className="flex flex-col items-start gap-3 p-6">
@@ -372,54 +430,81 @@ export default async function MisCursosPage() {
               </CardContent>
             </Card>
           ) : (
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              {publishedCourses.map((course) => (
-                <Card key={course.id} className="flex flex-col overflow-hidden">
-                  {course.signed_cover_url ? (
-                    <div className="relative aspect-video w-full overflow-hidden bg-slate-100">
-                      <Image
-                        src={course.signed_cover_url}
-                        alt={course.title}
-                        fill
-                        className="object-cover"
-                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                      />
-                    </div>
-                  ) : (
-                    <div className="relative aspect-video w-full bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center">
-                      <IconBook className="h-12 w-12 text-indigo-400" />
-                    </div>
-                  )}
-                  <CardHeader className="pb-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <CardTitle className="text-lg">{course.title}</CardTitle>
-                      <Badge variant="outline" className="shrink-0">
-                        {formatCurrency(course.price)}
-                      </Badge>
-                    </div>
-                    <CardDescription className="text-sm text-muted-foreground">
-                      Por {course.teacher}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="flex flex-1 flex-col gap-3">
-                    {course.description && (
-                      <p className="text-sm text-slate-600 line-clamp-2">{course.description}</p>
+            <>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {publishedCourses.map((course) => (
+                  <Card key={course.id} className="flex flex-col overflow-hidden">
+                    {course.signed_cover_url ? (
+                      <div className="relative aspect-video w-full overflow-hidden bg-slate-100">
+                        <Image
+                          src={course.signed_cover_url}
+                          alt={course.title}
+                          fill
+                          className="object-cover"
+                          sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                        />
+                      </div>
+                    ) : (
+                      <div className="relative aspect-video w-full bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center">
+                        <IconBook className="h-12 w-12 text-indigo-400" />
+                      </div>
                     )}
-                    <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                      <span>{course.moduleCount} módulos</span>
-                      <span>·</span>
-                      <span>{course.lessonCount} lecciones</span>
-                    </div>
-                    <Button className="w-full mt-auto" asChild>
-                      <Link href={`/workspace/cursos/${course.id}`}>
-                        <IconShoppingCart className="mr-2 h-4 w-4" />
-                        Ver detalles
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <CardTitle className="text-lg">{course.title}</CardTitle>
+                        <Badge variant="outline" className="shrink-0">
+                          {formatCurrency(course.price)}
+                        </Badge>
+                      </div>
+                      <CardDescription className="text-sm text-muted-foreground">
+                        Por {course.teacher}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="flex flex-1 flex-col gap-3">
+                      {course.description && (
+                        <p className="text-sm text-slate-600 line-clamp-2">{course.description}</p>
+                      )}
+                      <Button className="w-full mt-auto" asChild>
+                        <Link href={`/workspace/cursos/${course.id}`}>
+                          <IconShoppingCart className="mr-2 h-4 w-4" />
+                          Ver detalles
+                        </Link>
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between gap-3 pt-2">
+                <span className="text-sm text-muted-foreground">
+                  Pagina {page} de {totalPages} ({catalogCount} cursos)
+                </span>
+                <div className="flex items-center gap-2">
+                  {page > 1 && page <= totalPages ? (
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href={`/workspace/mis-cursos?tab=catalog&page=${page - 1}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ""}${sortOption ? `&sort=${sortOption}` : ""}`}>
+                        Anterior
                       </Link>
                     </Button>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                  ) : (
+                    <Button variant="outline" size="sm" disabled>
+                      Anterior
+                    </Button>
+                  )}
+                  {page < totalPages ? (
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href={`/workspace/mis-cursos?tab=catalog&page=${page + 1}${searchQuery ? `&q=${encodeURIComponent(searchQuery)}` : ""}${sortOption ? `&sort=${sortOption}` : ""}`}>
+                        Siguiente
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button variant="outline" size="sm" disabled>
+                      Siguiente
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </>
           )}
         </TabsContent>
       </Tabs>

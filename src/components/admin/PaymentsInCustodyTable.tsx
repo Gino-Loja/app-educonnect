@@ -46,6 +46,15 @@ interface GroupedTask {
   taskTitle: string
   teacherName: string | null
   teacherEmail: string | null
+  teacherBank?: {
+    bank_name: string | null
+    account_holder: string | null
+    account_number: string | null
+    account_type: string | null
+    account_alias: string | null
+    country: string | null
+    currency: string | null
+  } | null
   milestones: PaymentMilestoneWithDetails[]
   totalAmount: number
   milestonesCount: number
@@ -87,6 +96,31 @@ function TaskCustodyDialog({
             <p className="font-medium">{task.teacherName || "Sin asignar"}</p>
             {task.teacherEmail && (
               <p className="text-sm text-muted-foreground">{task.teacherEmail}</p>
+            )}
+            {task.teacherBank && (
+              <div className="mt-3 space-y-1 text-sm text-slate-700">
+                {task.teacherBank.bank_name && (
+                  <p><span className="font-medium">Banco:</span> {task.teacherBank.bank_name}</p>
+                )}
+                {task.teacherBank.account_holder && (
+                  <p><span className="font-medium">Titular:</span> {task.teacherBank.account_holder}</p>
+                )}
+                {task.teacherBank.account_number && (
+                  <p><span className="font-medium">Cuenta:</span> {task.teacherBank.account_number}</p>
+                )}
+                {(task.teacherBank.account_alias || task.teacherBank.account_type) && (
+                  <p>
+                    <span className="font-medium">Alias/Tipo:</span> {task.teacherBank.account_alias || "—"}
+                    {task.teacherBank.account_type ? ` • ${task.teacherBank.account_type}` : ""}
+                  </p>
+                )}
+                {(task.teacherBank.country || task.teacherBank.currency) && (
+                  <p>
+                    <span className="font-medium">Pais/Moneda:</span> {task.teacherBank.country || "—"}
+                    {task.teacherBank.currency ? ` • ${task.teacherBank.currency}` : ""}
+                  </p>
+                )}
+              </div>
             )}
           </div>
 
@@ -192,6 +226,7 @@ export function PaymentsInCustodyTable({ payments }: Props) {
           taskTitle,
           teacherName: payment.teacher?.name || null,
           teacherEmail: payment.teacher?.email || null,
+          teacherBank: payment.teacher?.bank || null,
           milestones: [],
           totalAmount: 0,
           milestonesCount: 0,

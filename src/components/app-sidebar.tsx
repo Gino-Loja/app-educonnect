@@ -50,6 +50,13 @@ const studentNavMain = [
     group: "courses",
   },
   {
+    title: "Cursos",
+    url: "/workspace/cursos",
+    icon: IconSearch,
+    description: "Explora nuevos cursos y compra",
+    group: "courses",
+  },
+  {
     title: "Propuestas",
     url: "/workspace/propuestas",
     icon: IconChartBar,

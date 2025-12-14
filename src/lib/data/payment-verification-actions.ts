@@ -3,6 +3,7 @@
 import { createClient } from "@/utils/supabase/server"
 import { requireAdmin } from "@/lib/auth/admin"
 import { revalidatePath } from "next/cache"
+import { parseObjectName, signMinioUrl } from "@/infrastructure/minio/storage"
 
 export type PaymentStatus =
   | "pending_payment"
@@ -42,7 +43,36 @@ export interface PaymentMilestoneWithDetails {
     id: string
     name: string | null
     email: string
+    bank?: {
+      bank_name: string | null
+      account_holder: string | null
+      account_number: string | null
+      account_type: string | null
+      account_alias: string | null
+      country: string | null
+      currency: string | null
+    } | null
   } | null
+}
+
+const PAYMENT_PROOF_BUCKET = process.env.MINIO_PAYMENT_PROOF_BUCKET || "comprobantes"
+
+function resolvePaymentProofObject(path: string) {
+  const parsed = parseObjectName(path)
+  if (parsed) {
+    if (parsed.bucket === PAYMENT_PROOF_BUCKET) {
+      return parsed
+    }
+    return { bucket: PAYMENT_PROOF_BUCKET, objectName: `${parsed.bucket}/${parsed.objectName}` }
+  }
+
+  return { bucket: PAYMENT_PROOF_BUCKET, objectName: path.replace(/^\//, "") }
+}
+
+async function signPaymentProofUrl(path: string | null) {
+  if (!path) return null
+  const resolved = resolvePaymentProofObject(path)
+  return await signMinioUrl(`${resolved.bucket}/${resolved.objectName}`)
 }
 
 /**
@@ -68,7 +98,8 @@ export async function getPendingVerifications() {
         teacher:profiles!tasks_teacher_id_fkey (
           id,
           name,
-          email
+          email,
+          bank:teacher_bank_accounts( bank_name, account_holder, account_number, account_type, account_alias, country, currency )
         )
       )
     `)
@@ -95,25 +126,10 @@ export async function getPendingVerifications() {
 
   const milestonesWithSignedUrls = await Promise.all(
     flattenedData.map(async (milestone) => {
-      if (milestone.payment_proof_url) {
-        let path = milestone.payment_proof_url
-        // Backward compatibility: if it's a full URL, extract the path
-        if (path.startsWith("http")) {
-          const parts = path.split("/comprobantes/")
-          if (parts.length > 1) {
-            path = parts[1]
-          }
-        }
+      if (!milestone.payment_proof_url) return milestone
 
-        const { data: signedData } = await supabase.storage
-          .from("comprobantes")
-          .createSignedUrl(path, 3600) // 1 hour expiry
-
-        if (signedData?.signedUrl) {
-          return { ...milestone, payment_proof_url: signedData.signedUrl }
-        }
-      }
-      return milestone
+      const signedUrl = await signPaymentProofUrl(milestone.payment_proof_url)
+      return signedUrl ? { ...milestone, payment_proof_url: signedUrl } : milestone
     })
   )
 
@@ -143,7 +159,8 @@ export async function getPaymentsInCustody() {
         teacher:profiles!tasks_teacher_id_fkey (
           id,
           name,
-          email
+          email,
+          bank:teacher_bank_accounts( bank_name, account_holder, account_number, account_type, account_alias, country, currency )
         )
       )
     `)
@@ -170,25 +187,10 @@ export async function getPaymentsInCustody() {
 
   const milestonesWithSignedUrls = await Promise.all(
     flattenedData.map(async (milestone) => {
-      if (milestone.payment_proof_url) {
-        let path = milestone.payment_proof_url
-        // Backward compatibility: if it's a full URL, extract the path
-        if (path.startsWith("http")) {
-          const parts = path.split("/comprobantes/")
-          if (parts.length > 1) {
-            path = parts[1]
-          }
-        }
+      if (!milestone.payment_proof_url) return milestone
 
-        const { data: signedData } = await supabase.storage
-          .from("comprobantes")
-          .createSignedUrl(path, 3600) // 1 hour expiry
-
-        if (signedData?.signedUrl) {
-          return { ...milestone, payment_proof_url: signedData.signedUrl }
-        }
-      }
-      return milestone
+      const signedUrl = await signPaymentProofUrl(milestone.payment_proof_url)
+      return signedUrl ? { ...milestone, payment_proof_url: signedUrl } : milestone
     })
   )
 

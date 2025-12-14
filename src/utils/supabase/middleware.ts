@@ -1,6 +1,9 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
+import { ensureProfileForUser } from '@/application/profiles/ensureProfile'
+import { makeProfilesRepository } from '@/infrastructure/supabase/profiles-repo'
+
 export async function updateSession(request: NextRequest) {
     let supabaseResponse = NextResponse.next({
         request,
@@ -35,40 +38,19 @@ export async function updateSession(request: NextRequest) {
     // Get user role if authenticated
     let userRole: string | null = null
     if (user) {
-        // Try to fetch the existing profile
-        const { data: profile } = await supabase
-            .from('profiles')
-            .select('id, role, email')
-            .eq('id', user.id)
-            .maybeSingle()
-
-        // If the profile is missing, create a minimal one so onboarding can continue
-        if (!profile) {
-            const defaultRole =
-                (user.user_metadata as { role?: string })?.role ?? 'student'
-
-            const { data: createdProfile } = await supabase
-                .from('profiles')
-                .upsert(
-                    {
-                        id: user.id,
-                        email: user.email ?? '',
-                        role: defaultRole,
-                        name: user.user_metadata?.full_name ?? null,
-                        onboarding_completed: false,
-                        profile_visibility: 'private',
-                        profile_completion_percentage: 0,
-                        is_active: true,
-                    },
-                    { onConflict: 'id' }
-                )
-                .select('role')
-                .single()
-
-            userRole = createdProfile?.role || defaultRole
-        } else {
-            userRole = profile.role || null
-        }
+        const profilesRepo = makeProfilesRepository(supabase)
+        const { role } = await ensureProfileForUser(
+            {
+                id: user.id,
+                email: user.email ?? "",
+                defaultRole: (user.user_metadata as { role?: string })?.role ?? "student",
+                name: user.user_metadata?.full_name ?? null,
+                profileVisibility: "private",
+                profileCompletionPercentage: 0,
+            },
+            { profilesRepo },
+        )
+        userRole = role
     }
 
     // If user is authenticated and trying to access auth pages, redirect based on role

@@ -2,16 +2,17 @@ import Link from "next/link"
 
 type ConfigNavigationProps = {
   role: "student" | "teacher"
-  active: "cuenta" | "finanzas"
+  active: "cuenta" | "finanzas" | "banco"
 }
 
 const baseTabs = [
   { key: "cuenta" as const, label: "Cuenta", href: "/workspace/configuracion/cuenta" },
-  { key: "finanzas" as const, label: "Parámetros financieros", href: "/workspace/configuracion/finanzas" },
+  { key: "finanzas" as const, label: "Parametros financieros", href: "/workspace/configuracion/finanzas" },
+  { key: "banco" as const, label: "Cuenta bancaria", href: "/workspace/configuracion/cuenta-bancaria" },
 ]
 
 export function ConfigNavigation({ role, active }: ConfigNavigationProps) {
-  const tabs = baseTabs.filter((tab) => role === "teacher" || tab.key !== "finanzas")
+  const tabs = baseTabs.filter((tab) => role === "teacher" || tab.key === "cuenta")
 
   return (
     <div className="flex flex-wrap items-center gap-2">

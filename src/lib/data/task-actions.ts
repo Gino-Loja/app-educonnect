@@ -1,5 +1,14 @@
 "use server"
 
+import {
+  cancelTask as cancelTaskUseCase,
+  completeTask as completeTaskUseCase,
+  createTask as createTaskUseCase,
+} from "@/application/tasks/createTask"
+import { makeTasksRepository } from "@/infrastructure/supabase/tasks-repo"
+import { deleteFromMinio, uploadToMinio } from "@/infrastructure/minio/storage"
+
+const TASK_ATTACHMENTS_BUCKET = process.env.MINIO_TASK_ATTACHMENTS_BUCKET || "task-attachments"
 import { createClient } from "@/utils/supabase/server"
 import { createTaskSchema } from "@/lib/validation/task-schema"
 import { revalidatePath } from "next/cache"
@@ -41,6 +50,7 @@ export async function createTask(
 ): Promise<ActionState> {
   try {
     const supabase = await createClient()
+    const tasksRepo = makeTasksRepository(supabase)
     const referenceFiles = formData
       .getAll("reference_files")
       .filter((file): file is File => file instanceof File && file.size > 0)
@@ -68,28 +78,7 @@ export async function createTask(
     if (userError || !user) {
       return {
         status: "error",
-        message: "Debes iniciar sesión para crear una tarea",
-      }
-    }
-
-    // Verify user is a student
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single()
-
-    if (profileError || !profile) {
-      return {
-        status: "error",
-        message: "Error al verificar tu perfil",
-      }
-    }
-
-    if (profile.role !== "student") {
-      return {
-        status: "error",
-        message: "Solo los estudiantes pueden crear tareas",
+        message: "Debes iniciar sesiÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³n para crear una tarea",
       }
     }
 
@@ -134,75 +123,75 @@ export async function createTask(
 
     const validatedData = validationResult.data
 
-    // Create task in database
-    const { data: task, error: createError } = await supabase
-      .from("tasks")
-      .insert({
-        student_id: user.id,
+    const taskResult = await createTaskUseCase(
+      {
+        studentId: user.id,
         title: validatedData.title,
         description: validatedData.description,
         subject: validatedData.subject,
-        academic_level: validatedData.academic_level,
+        academicLevel: validatedData.academic_level,
         difficulty: validatedData.difficulty || null,
-        topic_tags: validatedData.topic_tags,
-        budget_min: validatedData.budget_min,
-        budget_max: validatedData.budget_max,
-        payment_type: validatedData.payment_type,
-        due_date: validatedData.due_date,
-        estimated_hours: validatedData.estimated_hours,
+        topicTags: validatedData.topic_tags,
+        budgetMin: validatedData.budget_min ?? null,
+        budgetMax: validatedData.budget_max ?? null,
+        paymentType: validatedData.payment_type,
+        dueDate: validatedData.due_date ?? null,
+        estimatedHours: validatedData.estimated_hours ?? null,
         priority: validatedData.priority,
         installments: validatedData.installments,
-      })
-      .select()
-      .single()
+      },
+      { tasksRepo },
+    )
 
-    if (createError) {
-      console.error("Error creating task:", createError)
+    if (taskResult.status === "error" || !taskResult.taskId) {
       return {
         status: "error",
-        message: "Error al crear la tarea. Por favor intenta de nuevo.",
+        message: taskResult.status === "error" ? taskResult.message : "No pudimos crear la tarea",
       }
     }
 
+    const taskId = taskResult.taskId
+
     let referenceUploadMessage = ""
-    if (task && referenceFiles.length > 0) {
-      const uploadedPaths: string[] = []
+    if (referenceFiles.length > 0) {
+      const uploadedObjects: string[] = []
       const sanitizeFileName = (name: string) =>
         (name || "archivo.pdf").replace(/[^a-zA-Z0-9.-]/g, "_")
 
       for (const [index, file] of referenceFiles.entries()) {
-        const storagePath = `${task.id}/referencias/${Date.now()}_${index}_${sanitizeFileName(file.name)}`
-        const { data: uploadData, error: uploadError } = await supabase.storage
-          .from("task-attachments")
-          .upload(storagePath, file, {
-            contentType: "application/pdf",
-            upsert: false,
-          })
+        const storagePath = `${taskId}/referencias/${Date.now()}_${index}_${sanitizeFileName(file.name)}`
+        const uploadResult = await uploadToMinio({
+          bucket: TASK_ATTACHMENTS_BUCKET,
+          file,
+          objectName: storagePath,
+        }).catch((error) => {
+          console.error("Error uploading reference PDF to MinIO:", error)
+          return null
+        })
 
-        if (uploadError || !uploadData) {
-          console.error("Error uploading reference PDF:", uploadError)
-          if (uploadedPaths.length > 0) {
-            await supabase.storage.from("task-attachments").remove(uploadedPaths)
+        if (!uploadResult) {
+          if (uploadedObjects.length > 0) {
+            await Promise.all(
+              uploadedObjects.map((objectName) =>
+                deleteFromMinio(TASK_ATTACHMENTS_BUCKET, objectName),
+              ),
+            )
           }
           return {
             status: "error",
-            message: "La tarea se creó, pero hubo un error al subir tus referencias. Inténtalo de nuevo.",
+            message: "La tarea se creo, pero hubo un error al subir tus referencias. Intentalo de nuevo.",
           }
         }
 
-        uploadedPaths.push(uploadData.path)
-
-        const {
-          data: { publicUrl },
-        } = supabase.storage.from("task-attachments").getPublicUrl(uploadData.path)
+        uploadedObjects.push(uploadResult.objectName)
 
         const { error: attachmentError } = await supabase
           .from("task_attachments")
           .insert({
-            task_id: task.id,
+            task_id: taskId,
             uploaded_by: user.id,
             file_name: file.name,
-            file_url: publicUrl,
+            file_url: `${TASK_ATTACHMENTS_BUCKET}/${uploadResult.objectName}`,
             file_size: file.size,
             file_type: "application/pdf",
             attachment_type: "task_reference",
@@ -212,17 +201,21 @@ export async function createTask(
 
         if (attachmentError) {
           console.error("Error saving reference attachment:", attachmentError)
-          await supabase.storage.from("task-attachments").remove(uploadedPaths)
+          await Promise.all(
+            uploadedObjects.map((objectName) =>
+              deleteFromMinio(TASK_ATTACHMENTS_BUCKET, objectName),
+            ),
+          )
           return {
             status: "error",
-            message: "La tarea se creó, pero no pudimos guardar los PDFs. Inténtalo nuevamente.",
+            message: "La tarea se creo, pero no pudimos guardar los PDFs. Intentalo nuevamente.",
           }
         }
       }
 
       referenceUploadMessage =
         referenceFiles.length === 1
-          ? " Se agregó 1 PDF de referencia."
+          ? " Se agrego 1 PDF de referencia."
           : ` Se agregaron ${referenceFiles.length} PDFs de referencia.`
     }
 
@@ -524,7 +517,7 @@ export async function updateTask(
     if (userError || !user) {
       return {
         status: "error",
-        message: "Debes iniciar sesión para actualizar una tarea",
+        message: "Debes iniciar sesiÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³n para actualizar una tarea",
       }
     }
 
@@ -533,7 +526,7 @@ export async function updateTask(
     if (!taskId) {
       return {
         status: "error",
-        message: "ID de tarea inválido",
+        message: "ID de tarea invÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¡lido",
       }
     }
 
@@ -665,7 +658,7 @@ export async function deleteTask(taskId: string): Promise<ActionState> {
     if (userError || !user) {
       return {
         status: "error",
-        message: "Debes iniciar sesión",
+        message: "Debes iniciar sesiÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â³n",
       }
     }
 
@@ -733,15 +726,12 @@ export async function deleteTask(taskId: string): Promise<ActionState> {
  * Cancel a task (soft delete - changes status to 'cancelled')
  * Can be done at any time before 'completed'
  */
-export async function cancelTask(
-  taskId: string,
-  _reason?: string
-): Promise<ActionState> {
+export async function cancelTask(taskId: string, _reason?: string): Promise<ActionState> {
   try {
     const supabase = await createClient()
+    const tasksRepo = makeTasksRepository(supabase)
     void _reason
 
-    // Get current user
     const {
       data: { user },
       error: userError,
@@ -750,73 +740,15 @@ export async function cancelTask(
     if (userError || !user) {
       return {
         status: "error",
-        message: "Debes iniciar sesión",
+        message: "Debes iniciar sesion",
       }
     }
 
-    // Get task to verify ownership and status
-    const { data: task, error: fetchError } = await supabase
-      .from("tasks")
-      .select("student_id, status, teacher_id")
-      .eq("id", taskId)
-      .single()
-
-    if (fetchError || !task) {
-      return {
-        status: "error",
-        message: "Tarea no encontrada",
-      }
+    const result = await cancelTaskUseCase(taskId, user.id, { tasksRepo })
+    if (result.status === "error") {
+      return { status: "error", message: result.message }
     }
 
-    // Verify ownership
-    if (task.student_id !== user.id) {
-      return {
-        status: "error",
-        message: "No tienes permiso para cancelar esta tarea",
-      }
-    }
-
-    // Cannot cancel if already completed or cancelled
-    if (task.status === "completed") {
-      return {
-        status: "error",
-        message: "No puedes cancelar una tarea completada",
-      }
-    }
-
-    if (task.status === "cancelled") {
-      return {
-        status: "error",
-        message: "Esta tarea ya está cancelada",
-      }
-    }
-
-    // Warning if task has teacher assigned
-    if (task.status === "in_progress" && task.teacher_id) {
-      // In a real app, you might want to:
-      // 1. Notify the teacher
-      // 2. Apply penalties
-      // 3. Require a cancellation reason
-      console.warn(`Task ${taskId} cancelled while in progress with teacher ${task.teacher_id}`)
-    }
-
-    // Update task status to cancelled
-    const { error: updateError } = await supabase
-      .from("tasks")
-      .update({
-        status: "cancelled",
-      })
-      .eq("id", taskId)
-
-    if (updateError) {
-      console.error("Error cancelling task:", updateError)
-      return {
-        status: "error",
-        message: "Error al cancelar la tarea. Por favor intenta de nuevo.",
-      }
-    }
-
-    // Revalidate paths
     revalidatePath("/workspace/mis-tareas")
 
     return {
@@ -919,8 +851,8 @@ export async function getAssignedTasks(options?: {
 export async function completeTask(taskId: string): Promise<ActionState> {
   try {
     const supabase = await createClient()
+    const tasksRepo = makeTasksRepository(supabase)
 
-    // Get current user
     const {
       data: { user },
       error: userError,
@@ -929,64 +861,15 @@ export async function completeTask(taskId: string): Promise<ActionState> {
     if (userError || !user) {
       return {
         status: "error",
-        message: "Debes iniciar sesión",
+        message: "Debes iniciar sesion",
       }
     }
 
-    // Get task to verify ownership and status
-    const { data: task, error: fetchError } = await supabase
-      .from("tasks")
-      .select("teacher_id, status")
-      .eq("id", taskId)
-      .single()
-
-    if (fetchError || !task) {
-      return {
-        status: "error",
-        message: "Tarea no encontrada",
-      }
+    const result = await completeTaskUseCase(taskId, user.id, { tasksRepo })
+    if (result.status === "error") {
+      return { status: "error", message: result.message }
     }
 
-    // Verify ownership (only teacher can complete)
-    if (task.teacher_id !== user.id) {
-      return {
-        status: "error",
-        message: "No tienes permiso para completar esta tarea",
-      }
-    }
-
-    // Verify status
-    if (task.status === "completed") {
-      return {
-        status: "error",
-        message: "Esta tarea ya está completada",
-      }
-    }
-
-    if (task.status === "cancelled") {
-      return {
-        status: "error",
-        message: "No puedes completar una tarea cancelada",
-      }
-    }
-
-    // Update task status to completed
-    const { error: updateError } = await supabase
-      .from("tasks")
-      .update({
-        status: "completed",
-      })
-      .eq("id", taskId)
-
-    if (updateError) {
-      console.error("Error completing task:", updateError)
-      return {
-        status: "error",
-        message: "Error al completar la tarea. Por favor intenta de nuevo.",
-      }
-    }
-
-    // Revalidate paths
     revalidatePath("/workspace/mis-trabajos")
     revalidatePath(`/workspace/mis-trabajos/${taskId}`)
 

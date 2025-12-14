@@ -10,18 +10,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { PendingCoursePayment, getPendingCoursePayments, verifyCoursePayment } from "@/lib/data/course-actions"
 import { requireAdmin } from "@/lib/auth/admin"
+import type { PendingPayment } from "@/domain/payments"
+import { getPendingPayments, verifyPayment } from "./actions"
 
 import { VerifyPaymentButton } from "./verify-payment-button"
 
 export default async function AdminCoursePaymentsPage() {
   await requireAdmin()
-  const payments = await getPendingCoursePayments()
+  const payments = await getPendingPayments()
 
   return (
     <div className="flex flex-col gap-6 p-6">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold">Pagos de cursos</h1>
           <p className="text-sm text-muted-foreground">
@@ -36,7 +37,7 @@ export default async function AdminCoursePaymentsPage() {
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Pagos pendientes de verificación</CardTitle>
+          <CardTitle>Pagos pendientes de verificacion</CardTitle>
           <Badge variant="outline">Curso</Badge>
         </CardHeader>
         <CardContent>
@@ -48,13 +49,13 @@ export default async function AdminCoursePaymentsPage() {
                 <TableRow>
                   <TableHead>Curso</TableHead>
                   <TableHead>Estudiante</TableHead>
-                  <TableHead>Método</TableHead>
+                  <TableHead>Metodo</TableHead>
                   <TableHead>Comprobante</TableHead>
                   <TableHead>Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {payments.map((payment: PendingCoursePayment) => (
+                {payments.map((payment: PendingPayment) => (
                   <TableRow key={payment.id}>
                     <TableCell className="font-medium">
                       <div className="flex flex-col">
@@ -74,9 +75,9 @@ export default async function AdminCoursePaymentsPage() {
                     </TableCell>
                     <TableCell className="capitalize">{payment.method}</TableCell>
                     <TableCell>
-                      {payment.proof_url_signed ? (
+                      {payment.proofUrlSigned ? (
                         <a
-                          href={payment.proof_url_signed}
+                          href={payment.proofUrlSigned}
                           target="_blank"
                           rel="noreferrer"
                           className="inline-flex items-center gap-1 text-sm text-blue-600 hover:underline"
@@ -91,7 +92,7 @@ export default async function AdminCoursePaymentsPage() {
                     <TableCell>
                       <VerifyPaymentButton
                         paymentId={payment.id}
-                        action={verifyCoursePayment}
+                        action={verifyPayment}
                       />
                     </TableCell>
                   </TableRow>

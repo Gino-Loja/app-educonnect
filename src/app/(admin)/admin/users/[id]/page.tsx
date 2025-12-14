@@ -57,6 +57,7 @@ export default async function AdminUserDetailPage({ params }: Props) {
   const roleLabel = ROLE_LABELS[user.role] || user.role
   const student = user.student
   const teacher = user.teacher
+  const teacherBank = user.teacher_bank_account
 
   return (
     <div className="space-y-6">
@@ -237,6 +238,42 @@ export default async function AdminUserDetailPage({ params }: Props) {
             <div className="space-y-1">
               <p className="text-muted-foreground">Ingresos totales</p>
               <p className="font-medium">{formatMoney(teacher.total_earnings)}</p>
+            </div>
+            <div className="md:col-span-3 space-y-2 rounded-md border border-slate-200 p-3">
+              <p className="text-sm font-semibold">Cuenta bancaria</p>
+              {teacherBank ? (
+                <div className="grid gap-2 md:grid-cols-3 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">Banco</p>
+                    <p className="font-medium">{teacherBank.bank_name || "Sin dato"}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Titular</p>
+                    <p className="font-medium">{teacherBank.account_holder || "Sin dato"}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Cuenta</p>
+                    <p className="font-medium">{teacherBank.account_number || "Sin dato"}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Alias</p>
+                    <p className="font-medium">{teacherBank.account_alias || "Sin dato"}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Tipo</p>
+                    <p className="font-medium">{teacherBank.account_type || "Sin dato"}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Pais / Moneda</p>
+                    <p className="font-medium">
+                      {(teacherBank.country || "Sin dato") +
+                        (teacherBank.currency ? ` • ${teacherBank.currency}` : "")}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Sin datos bancarios registrados.</p>
+              )}
             </div>
           </CardContent>
         </Card>

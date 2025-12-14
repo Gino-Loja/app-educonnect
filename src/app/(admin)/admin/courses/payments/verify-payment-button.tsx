@@ -5,11 +5,11 @@ import { useRouter } from "next/navigation"
 import { IconCheck, IconLoader2 } from "@tabler/icons-react"
 
 import { Button } from "@/components/ui/button"
-import { type PurchaseFormState } from "@/lib/data/course-actions"
+import type { AdminActionResult } from "./actions"
 
 interface VerifyPaymentButtonProps {
   paymentId: string
-  action: (paymentId: string) => Promise<PurchaseFormState>
+  action: (paymentId: string) => Promise<AdminActionResult>
 }
 
 export function VerifyPaymentButton({ paymentId, action }: VerifyPaymentButtonProps) {

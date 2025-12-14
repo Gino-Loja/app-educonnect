@@ -1,36 +1,48 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# EduTask
 
-## Getting Started
+Next.js 15 (App Router) app that conecta estudiantes y docentes para tareas y cursos, con pagos por hitos, chat en tiempo real y almacenamiento privado en MinIO.
 
-First, run the development server:
+## Stack
+- Next.js 15.5.2 (App Router, React 19)
+- TypeScript 5, strict mode
+- Tailwind CSS 4 + Radix UI/shadcn patterns
+- Supabase: auth y base de datos
+- MinIO: archivos privados (perfil, tareas, entregas, comprobantes)
 
+## Estructura clave
+- `src/app/(auth)/*`: login/registro/cuenta
+- `src/app/(main)/workspace`: vistas autenticadas (estudiante/teacher) y chat
+- `src/app/dashboard`: dashboard general
+- `src/application`: casos de uso
+- `src/domain`: contratos de dominio
+- `src/infrastructure/supabase`: repositorios Supabase
+- `src/infrastructure/minio`: helpers de storage
+- `src/lib/data`: server actions (adaptadores a casos de uso)
+- `src/modules/chat`: UI y lógica de chat
+
+## Comandos
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run dev      # Dev server (Turbopack)
+npm run build    # Build producción
+npm start        # Servir build
+npm run lint     # ESLint
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Variables de entorno requeridas
+- Supabase: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- MinIO: `MINIO_ENDPOINT`, `MINIO_PORT`, `MINIO_USE_SSL`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`
+- Buckets MinIO (privados, crear previamente o se crean en uso):  
+  `MINIO_PROFILE_BUCKET` (default `profile-pictures`),  
+  `MINIO_TASK_ATTACHMENTS_BUCKET` (default `task-attachments`),  
+  `MINIO_SUBMISSION_BUCKET` (default `task-progress`),  
+  `MINIO_PAYMENT_PROOF_BUCKET` (default `comprobantes`).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Notas de funcionalidad
+- Chat carga 10 mensajes a la vez y permite “ver más” al hacer scroll.
+- Botón “Finalizar Tarea” solo aparece cuando la tarea está en `submitted`.
+- Almacenamiento migrado a MinIO (referencias, entregas, comprobantes, perfiles); URLs se sirven con firmas temporales.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Desarrollo rápido
+1) Copia `.env.local` con las variables anteriores.  
+2) `npm install`  
+3) `npm run dev` y abre `http://localhost:3000`.
