@@ -51,6 +51,17 @@ export async function login(
 export async function signup(prevState: unknown, formData: FormData) {
   const supabase = await createClient()
 
+  const getSiteUrl = () => {
+    const envUrl =
+      process.env.NEXT_PUBLIC_SITE_URL ||
+      (process.env.NEXT_PUBLIC_VERCEL_URL
+        ? `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
+        : undefined) ||
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : undefined)
+
+    return (envUrl ?? 'http://localhost:3000').replace(/\/$/, '')
+  }
+
   const parsed = registerSchema.safeParse({
     email: formData.get("email"),
     password: formData.get("password"),
@@ -83,7 +94,7 @@ export async function signup(prevState: unknown, formData: FormData) {
       data: {
         role: parsed.data.role,
       },
-      emailRedirectTo: `http://localhost:3000/account/`,
+      emailRedirectTo: `${getSiteUrl()}/account`,
     },
   })
 
